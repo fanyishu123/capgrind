@@ -1,2 +1,4 @@
 capgrind
 ========
+
+test

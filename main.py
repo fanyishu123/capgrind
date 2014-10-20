@@ -34,7 +34,7 @@ print "Files:", image_fns
 
 # Image sources
 all_sources = [Image_source(image_fns[i]) for i in range(total_sources)]
-sources = [all_sources[1], None]
+sources = [all_sources[0]]
 #print "image source 1", "("+str(sources[0])+")", "matches 1:", "("+str(sources[0])+")", np.array_equal(sources[0].image,sources[0].image)
 #print "image source 1", "("+str(sources[0])+")", "matches 2:", "("+str(sources[1])+")", np.array_equal(sources[0].image,sources[1].image)
 print "Sources:", sources
@@ -51,7 +51,7 @@ fr.pack(fill=BOTH,expand=YES)
 
 
 # WM
-wm = WM_instance('PROJECTION', WM.TEMPLATES['PROJECTION'], sources, all_sources)
+wm = WM_instance('FULLSCREEN', WM.TEMPLATES['FULLSCREEN'], sources, all_sources)
 fig = wm.get_figure()
 
 # Image (tk.DrawingArea)
@@ -89,7 +89,7 @@ buttons=Frame(cfr)
 buttons.pack(side=LEFT,fill=X,expand=1)
 
 # Matplotlib toolbar
-toolbar = NavigationToolbar2TkAgg(canvas, buttons, wm)
+toolbar = NavigationToolbar2TkAgg(canvas, root, wm)
 toolbar.update()
 
 # Expand rules

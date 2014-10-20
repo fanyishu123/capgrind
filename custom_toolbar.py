@@ -32,10 +32,12 @@ class Cursors:
 cursors = Cursors()
 
 cursord = {
-    cursors.MOVE: "fleur",
-    cursors.HAND: "hand2",
-    cursors.POINTER: "arrow",
-    cursors.SELECT_REGION: "tcross",
+    "none" : "arrow",
+    "slice" : "fleur",
+    "bvalue" : "fleur",
+    "pan" : "hand2",
+    "crosshair": "tcross",
+    "ZOOM": "tcross",
     }
 
 class NavigationToolbar2(object):
@@ -90,9 +92,12 @@ class NavigationToolbar2(object):
     #   name_of_method, # name of the method in NavigationToolbar2 to call
     # )
     toolitems = (
+        ('Sources', 'Select sources', 'move', 'wm_sources'),
         ('View', 'Select view', 'move', 'wm_view'),
         ('Source', 'Select source', 'move', 'source'),
         ('Axis', 'Toggle Axis', 'move', 'axis'),
+        ('Crosshair', 'Show a point in space', 'move', 'crosshair'),
+        ('B-value', 'Pan through b-values', 'move', 'bvalue'),
         ('Slice', 'Pan through slices', 'move', 'slice'),
         ('Home', 'Reset original view', 'home', 'home'),
         ('Back', 'Back to  previous view', 'back', 'back'),
@@ -112,100 +117,158 @@ class NavigationToolbar2(object):
         canvas.toolbar = self
         # a dict from axes index to a list of view limits
         self._views = cbook.Stack()
+        self._views2 = cbook.Stack()
         self._positions = cbook.Stack()  # stack of subplot positions
-        self._xypress = None  # the location and axis info at the time
-                              # of the press
+
+
         self._idPress = None
         self._idRelease = None
-        self._active = None
-        self._lastCursor = None
-        self._init_toolbar()
         self._idDrag = self.canvas.mpl_connect(
             'motion_notify_event', self.mouse_move)
+        self._ids_zoom = [] # Zoom equivalent for drag ID (mouse move, key press, key release)
 
-        self._ids_zoom = []
-        self._zoom_mode = None
+        self._last_axis = None # Axis where the button was pressed
+        self._xypress = None  # Press info for the zoom rectangle
 
-        self._button_pressed = None  # determined by the button pressed
-                                     # at start
+        self._active = None # ID string denoting active mode
+        self._button_pressed = None  # Save the mouse button pressed at canvas
+        self._zoom_mode = None # Key pressed in zoom mode, to limit to y/x zooming
 
-        self.mode = ''  # a mode string for the status bar
+        self._lastCursor = None # GUI mouse cursor
+        self.mode = '' # GUI status message
+        self._init_toolbar()
+
+
+
+  # a mode string for the status bar
         self.set_history_buttons()
 
-    def set_message(self, s):
-        """Display a message on toolbar or in status bar"""
-        pass
-
-    def back(self, *args):
-        """move back up the view lim stack"""
-        self._views.back()
-        self._positions.back()
-        self.set_history_buttons()
-        self._update_view()
-
-    def dynamic_update(self):
-        pass
-
-    def draw_rubberband(self, event, x0, y0, x1, y1):
-        """Draw a rectangle rubberband to indicate zoom limits"""
-        pass
-
-    def forward(self, *args):
-        """Move forward in the view lim stack"""
-        self._views.forward()
-        self._positions.forward()
-        self.set_history_buttons()
-        self._update_view()
-
-    def home(self, *args):
-        """Restore the original view"""
-        self._views.home()
-        self._positions.home()
-        self.set_history_buttons()
-        self._update_view()
-
-    def _init_toolbar(self):
+    # ACTIVATION FUNCTIONS
+    # General activation function called from the GUI
+    def activate(self, mode_id, *args):
+        """ General activation function for toolbar button press.
+            Set the active mode and connect corresponding callbacks.
         """
-        This is where you actually build the GUI widgets (called by
-        __init__).  The icons ``home.xpm``, ``back.xpm``, ``forward.xpm``,
-        ``hand.xpm``, ``zoom_to_rect.xpm`` and ``filesave.xpm`` are standard
-        across backends (there are ppm versions in CVS also).
 
-        You just need to set the callbacks
+        if self._active == mode_id:
+            self._active = None
+        else:
+            self._active = mode_id
+        if self._idPress is not None:
+            self._idPress = self.canvas.mpl_disconnect(self._idPress)
+            self.mode = ''
 
-        home         : self.home
-        back         : self.back
-        forward      : self.forward
-        hand         : self.pan
-        zoom_to_rect : self.zoom
-        filesave     : self.save_figure
+        if self._idRelease is not None:
+            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
+            self.mode = ''
 
-        You only need to define the last one - the others are in the base
-        class implementation.
+        if self._active:
+            self._idPress = self.canvas.mpl_connect('button_press_event',
+                                                    getattr(self, 'press_' + mode_id))
+            self._idRelease = self.canvas.mpl_connect('button_release_event',
+                                                    getattr(self, 'release_' + mode_id))
+            self.mode = mode_id
+            self.canvas.widgetlock(self)
+        else:
+            self.canvas.widgetlock.release(self)
 
-        """
-        raise NotImplementedError
+        for a in self.canvas.figure.get_axes():
+            a.set_navigate_mode(self._active)
 
+        self.set_message(self.mode)
+    # just get rid of these altogether
+    def pan(self, *args): self.activate('pan')
+    def slice(self, *args): self.activate('slice')
+    def crosshair(self, *args): self.activate('crosshair')
+    def bvalue(self, *args): self.activate('bvalue')
+    def axis(self, *args): self.activate('axis')
+    def wm_sources(self, *args): self.activate('sources')
+    def wm_view(self, *args): self.activate('view')
+    def source(self, *args): self.activate('source')
+
+
+    # CANVAS MOUSE PRESS
+    # Called when mouse button is pressed
+    def press(self, event): pass
+    # General function to call when a mouse press occurs in canvas
+    def press_canvas(self, mode_string, event, implements = (1,)):
+
+        if event.button in implements:
+            self._button_pressed = event.button
+        else:
+            self._button_pressed = None
+            return
+
+        # push the current view to define home if stack is empty
+        if self._views.empty():
+            self.push_current()
+
+        x, y = event.x, event.y
+        for i, a in enumerate(self.canvas.figure.get_axes()):
+            if x is not None and y is not None and a.in_axes(event) and a.get_navigate() and a.can_pan():
+
+                self._last_axis = a
+                self.canvas.mpl_disconnect(self._idDrag)
+                # Can replaced by a subclass like structure
+                a2 = self.Winst.get_adapter(a)
+                if self._button_pressed == 1:
+                    getattr(a2, 'start_'+self._active)(x, y, event.button)
+                    self._idDrag = self.canvas.mpl_connect('motion_notify_event', getattr(self,'drag_'+self._active))
+                elif self._button_pressed == 3:
+                    #TODO: seperate zoom/pan into two buttons to get rid of the first if
+                    if self._active == 'pan':
+                        getattr(a2, 'start_'+self._active)(x, y, event.button)
+                        self._idDrag = self.canvas.mpl_connect('motion_notify_event', getattr(self,'drag_'+self._active))
+                    else:
+                        getattr(self, self._active+'_menu')(event)
+
+
+        self.press(event)
+    # Connect to drag_mode
+    def press_pan(self, event): self.press_canvas('pan', event, implements = (1,3))
+    def press_slice(self, event): self.press_canvas('slice', event, implements = (1,))
+    def press_crosshair(self, event): self.press_canvas('crosshair', event, implements = (1,))
+    def press_bvalue(self, event): self.press_canvas('bvalue', event, implements = (1,))
+    # Call mode_menu
+    def press_axis(self, event): self.press_canvas('axis', event, implements = (3,))
+    def press_sources(self, event): self.press_canvas('sources', event, implements = (3,))
+    def press_view(self, event): self.press_canvas('view', event, implements = (3,))
+    def press_source(self, event): self.press_canvas('source', event, implements = (3,))
+
+
+    # CANVAS MOUSE DRAG
+    # General function to call when a mouse drag occurs in canvas
+    def drag_canvas(self, event):
+        a = self._last_axis
+        a2 = self.Winst.get_adapter(a)
+        getattr(a2, 'drag_'+self._active)(event)
+        self.display_message(event)
+        self.dynamic_update()
+    # When the tool is not active
     def mouse_move(self, event):
         if not event.inaxes or not self._active:
-            if self._lastCursor != cursors.POINTER:
-                self.set_cursor(cursors.POINTER)
-                self._lastCursor = cursors.POINTER
+            if self._lastCursor != "none":
+                self.set_cursor("none")
+                self._lastCursor = "none"
         else:
-            if self._active == 'ZOOM':
-                if self._lastCursor != cursors.SELECT_REGION:
-                    self.set_cursor(cursors.SELECT_REGION)
-                    self._lastCursor = cursors.SELECT_REGION
-            elif (self._active == 'PAN' and
-                  self._lastCursor != cursors.MOVE):
-                self.set_cursor(cursors.MOVE)
+            if self._lastCursor != self._active:
+                if cursord.has_key(self._active):
+                    self.set_cursor(self._active)
+                else:
+                    self.set_cursor("none")
+                self._lastCursor = self._active
+        self.display_message(event)
 
-                self._lastCursor = cursors.MOVE
-
+    def display_message(self, event):
         if event.inaxes and event.inaxes.get_navigate():
-
             try:
-                s = event.inaxes.format_coord(event.xdata, event.ydata)
+                a2 = self.Winst.get_adapter(event.inaxes)
+                if self._active in ('crosshair', None):
+                    s = a2.get_display_str(event.xdata, event.ydata)
+                elif self._active in ('slice','bvalue','pan'):
+                    s = a2.get_display_minor_str(event.xdata, event.ydata)
+                else:
+                    s = event.inaxes.format_coord(event.xdata, event.ydata)
             except (ValueError, OverflowError):
                 pass
             else:
@@ -216,15 +279,68 @@ class NavigationToolbar2(object):
         else:
             self.set_message(self.mode)
 
-    def pan(self, *args):
-        """Activate the pan/zoom tool. pan with left button, zoom with right"""
-        # set the pointer icon and button press funcs to the
-        # appropriate callbacks
 
-        if self._active == 'PAN':
+    # Drag functions
+    def drag_pan(self, event): self.drag_canvas(event)
+    def drag_slice(self, event): self.drag_canvas(event)
+    def drag_bvalue(self, event): self.drag_canvas(event)
+    def drag_crosshair(self, event): self.drag_canvas(event)
+    # Menu functions, overwritten in GUI's subclass
+    def axis_menu(self, event): pass
+    def sources_menu(self, event): pass
+    def view_menu(self, event): pass
+    def source_menu(self, event): pass
+
+
+    # CANVAS MOUSE RELEASE
+    # Called when mouse button is released
+    def release(self, event): pass
+    # General function to call when a mouse release occurs in canvas
+    def release_canvas(self, event):
+        if self._button_pressed is None:
+            return
+        self.canvas.mpl_disconnect(self._idDrag)
+        self._idDrag = self.canvas.mpl_connect('motion_notify_event', self.mouse_move)
+
+        if not self._last_axis:
+            return
+        a = self._last_axis
+        a2 = self.Winst.get_adapter(a)
+        # Menus do not implement this
+        if hasattr(a2,'end_'+self._active):
+            getattr(a2, 'end_'+self._active)()
+
+        self._button_pressed = None
+        self._last_axis = None
+
+        self.push_current()
+        self.release(event)
+        self.draw()
+    # just get rid of these altogether
+    def release_pan(self, event): self.release_canvas(event)
+    def release_slice(self, event): self.release_canvas(event)
+    def release_crosshair(self, event): self.release_canvas(event)
+    def release_bvalue(self, event): self.release_canvas(event)
+    def release_axis(self, event): self.release_canvas(event)
+    def release_sources(self, event): self.release_canvas(event)
+    def release_view(self, event): self.release_canvas(event)
+    def release_source(self, event): self.release_canvas(event)
+
+    def get_method(self, a, f):
+        if hasattr(a,f): return getattr(a, f)
+        else:
+            a2 = self.Winst.get_adapter(a)
+            if hasattr(a2,f): return getattr(a2, f)
+            else: return None
+
+    # The black sheep
+    def zoom(self, *args):
+        """Activate zoom to rect mode"""
+        if self._active == 'ZOOM':
             self._active = None
         else:
-            self._active = 'PAN'
+            self._active = 'ZOOM'
+
         if self._idPress is not None:
             self._idPress = self.canvas.mpl_disconnect(self._idPress)
             self.mode = ''
@@ -234,11 +350,11 @@ class NavigationToolbar2(object):
             self.mode = ''
 
         if self._active:
-            self._idPress = self.canvas.mpl_connect(
-                'button_press_event', self.press_pan)
-            self._idRelease = self.canvas.mpl_connect(
-                'button_release_event', self.release_pan)
-            self.mode = 'pan/zoom'
+            self._idPress = self.canvas.mpl_connect('button_press_event',
+                                                    self.press_zoom)
+            self._idRelease = self.canvas.mpl_connect('button_release_event',
+                                                      self.release_zoom)
+            self.mode = 'zoom rect'
             self.canvas.widgetlock(self)
         else:
             self.canvas.widgetlock.release(self)
@@ -247,293 +363,6 @@ class NavigationToolbar2(object):
             a.set_navigate_mode(self._active)
 
         self.set_message(self.mode)
-
-    def debug(self, *args):
-        """Activate the pan/zoom tool. pan with left button, zoom with right"""
-        # set the pointer icon and button press funcs to the
-        # appropriate callbacks
-        self.Winst.print_debug()
-
-    def slice(self, *args):
-        """Activate the slice tool."""
-        # set the pointer icon and button press funcs to the
-        # appropriate callbacks
-
-        if self._active == 'SLICE':
-            self._active = None
-        else:
-            self._active = 'SLICE'
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            self._idPress = self.canvas.mpl_connect(
-                'button_press_event', self.press_slice)
-            self._idRelease = self.canvas.mpl_connect(
-                'button_release_event', self.release_slice)
-            self.mode = 'slice'
-            self.canvas.widgetlock(self)
-        else:
-            self.canvas.widgetlock.release(self)
-
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(self._active)
-
-        self.set_message(self.mode)
-
-
-    def axis(self, *args):
-        """Activate the axis toggle tool."""
-        # set the pointer icon and button press funcs to the
-        # appropriate callbacks
-
-        if self._active == 'AXIS':
-            self._active = None
-        else:
-            self._active = 'AXIS'
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            self._idPress = self.canvas.mpl_connect(
-                'button_press_event', self.press_axis)
-            self._idRelease = self.canvas.mpl_connect(
-                'button_release_event', self.release_axis)
-            self.mode = 'axis'
-            self.canvas.widgetlock(self)
-        else:
-            self.canvas.widgetlock.release(self)
-
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(self._active)
-
-        self.set_message(self.mode)
-
-    def wm_view(self, *args):
-        """Activate the view toggle tool."""
-        # set the pointer icon and button press funcs to the
-        # appropriate callbacks
-
-        if self._active == 'VIEW':
-            self._active = None
-        else:
-            self._active = 'VIEW'
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            self._idPress = self.canvas.mpl_connect(
-                'button_press_event', self.press_view)
-            self._idRelease = self.canvas.mpl_connect(
-                'button_release_event', self.release_view)
-            self.mode = 'view'
-            self.canvas.widgetlock(self)
-        else:
-            self.canvas.widgetlock.release(self)
-
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(self._active)
-
-        self.set_message(self.mode)
-
-    def source(self, *args):
-        """Activate the source toggle tool."""
-        # set the pointer icon and button press funcs to the
-        # appropriate callbacks
-
-        if self._active == 'SOURCE':
-            self._active = None
-        else:
-            self._active = 'SOURCE'
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            self._idPress = self.canvas.mpl_connect(
-                'button_press_event', self.press_source)
-            self._idRelease = self.canvas.mpl_connect(
-                'button_release_event', self.release_source)
-            self.mode = 'source'
-            self.canvas.widgetlock(self)
-        else:
-            self.canvas.widgetlock.release(self)
-
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(self._active)
-
-        self.set_message(self.mode)
-
-
-
-    def press(self, event):
-        """Called whenver a mouse button is pressed."""
-        pass
-
-    def press_pan(self, event):
-        """the press mouse button in pan/zoom mode callback"""
-
-        if event.button == 1:
-            self._button_pressed = 1
-        elif event.button == 3:
-            self._button_pressed = 3
-        else:
-            self._button_pressed = None
-            return
-
-        x, y = event.x, event.y
-
-        # push the current view to define home if stack is empty
-        if self._views.empty():
-            self.push_current()
-
-        self._xypress = []
-        for i, a in enumerate(self.canvas.figure.get_axes()):
-            if (x is not None and y is not None and a.in_axes(event) and
-                    a.get_navigate() and a.can_pan()):
-                a.start_pan(x, y, event.button)
-                self._xypress.append((a, i))
-                self.canvas.mpl_disconnect(self._idDrag)
-                self._idDrag = self.canvas.mpl_connect('motion_notify_event',
-                                                       self.drag_pan)
-
-        self.press(event)
-
-    def press_slice(self, event):
-        """the press mouse button in slice mode callback"""
-
-        #print "press slice..."
-        if event.button == 1:
-            self._button_pressed = 1
-        else:
-            self._button_pressed = None
-            return
-
-        x, y = event.x, event.y
-
-        # push the current view to define home if stack is empty
-        if self._views.empty():
-            self.push_current()
-
-        self._xypress = []
-        for i, a in enumerate(self.canvas.figure.get_axes()):
-            if (x is not None and y is not None and a.in_axes(event) and
-                    a.get_navigate() and a.can_pan()):
-                a2 = self.Winst.get_adapter(a)
-                a2.start_slice(x,y)
-                print "start slice:", a2.view.get_slice()
-                self._xypress.append((x, y, a, i, a.viewLim.frozen()))
-                self.canvas.mpl_disconnect(self._idDrag)
-                self._idDrag = self.canvas.mpl_connect('motion_notify_event',
-                                                       self.drag_slice)
-
-        self.press(event)
-
-    def press_axis(self, event):
-        """the press mouse button in pan/zoom mode callback"""
-
-        if event.button == 1:
-            self._button_pressed = 1
-        elif event.button == 3:
-            self._button_pressed = 3
-        else:
-            self._button_pressed = None
-            return
-
-        x, y = event.x, event.y
-
-        # push the current view to define home if stack is empty
-        if self._views.empty():
-            self.push_current()
-
-        self._xypress = []
-
-
-        for i, a in enumerate(self.canvas.figure.get_axes()):
-            if (x is not None and y is not None and a.in_axes(event) and
-                    a.get_navigate() and a.can_pan()):
-                self.canvas.mpl_disconnect(self._idDrag)
-                a2 = self.Winst.get_adapter(a)
-                if event.button == 1:
-                    a2.toggle_projection()
-                    self.dynamic_update()
-                else:
-                    self.axis_menu(event,a2)
-
-        self.press(event)
-
-    def press_view(self, event):
-        """the press mouse button in pan/zoom mode callback"""
-
-        if event.button == 1:
-            self._button_pressed = 1
-        else:
-            self._button_pressed = None
-            return
-
-        x, y = event.x, event.y
-
-        # push the current view to define home if stack is empty
-        if self._views.empty():
-            self.push_current()
-
-        self._xypress = []
-
-
-        for i, a in enumerate(self.canvas.figure.get_axes()):
-            if (x is not None and y is not None and a.in_axes(event) and
-                    a.get_navigate() and a.can_pan()):
-                self.canvas.mpl_disconnect(self._idDrag)
-                self.view_menu(a,event)
-
-        self.press(event)
-
-    def press_source(self, event):
-        """the press mouse button in pan/zoom mode callback"""
-
-        if event.button == 1:
-            self._button_pressed = 1
-        else:
-            self._button_pressed = None
-            return
-
-        x, y = event.x, event.y
-
-        # push the current view to define home if stack is empty
-        if self._views.empty():
-            self.push_current()
-
-        self._xypress = []
-
-
-        for i, a in enumerate(self.canvas.figure.get_axes()):
-            if (x is not None and y is not None and a.in_axes(event) and
-                    a.get_navigate() and a.can_pan()):
-                self.canvas.mpl_disconnect(self._idDrag)
-                a2 = self.Winst.get_adapter(a)
-                self.source_menu(a2,event)
-
-        self.press(event)
-
     def press_zoom(self, event):
         """the press mouse button in zoom to rect mode callback"""
         # If we're already in the middle of a zoom, pressing another
@@ -579,70 +408,6 @@ class NavigationToolbar2(object):
         self._zoom_mode = event.key
 
         self.press(event)
-
-    def _switch_on_zoom_mode(self, event):
-        self._zoom_mode = event.key
-        self.mouse_move(event)
-
-    def _switch_off_zoom_mode(self, event):
-        self._zoom_mode = None
-        self.mouse_move(event)
-
-    def push_current(self):
-        """push the current view limits and position onto the stack"""
-        lims = []
-        pos = []
-        for a in self.canvas.figure.get_axes():
-            xmin, xmax = a.get_xlim()
-            ymin, ymax = a.get_ylim()
-            lims.append((xmin, xmax, ymin, ymax))
-            # Store both the original and modified positions
-            pos.append((
-                a.get_position(True).frozen(),
-                a.get_position().frozen()))
-        self._views.push(lims)
-        self._positions.push(pos)
-        self.set_history_buttons()
-
-    def release(self, event):
-        """this will be called whenever mouse button is released"""
-        pass
-
-    def release_pan(self, event):
-        """the release mouse button callback in pan/zoom mode"""
-
-        if self._button_pressed is None:
-            return
-        self.canvas.mpl_disconnect(self._idDrag)
-        self._idDrag = self.canvas.mpl_connect(
-            'motion_notify_event', self.mouse_move)
-        for a, ind in self._xypress:
-            a.end_pan()
-        if not self._xypress:
-            return
-        self._xypress = []
-        self._button_pressed = None
-        self.push_current()
-        self.release(event)
-        self.draw()
-
-    def drag_pan(self, event):
-        """the drag callback in pan/zoom mode"""
-
-        for a, ind in self._xypress:
-            #safer to use the recorded button at the press than current button:
-            #multiple button can get pressed during motion...
-            a.drag_pan(self._button_pressed, event.key, event.x, event.y)
-        self.dynamic_update()
-
-    def drag_slice(self, event):
-        lastx, lasty, a, i, lim = self._xypress[0]
-        x1, y1, x2, y2 = a.bbox.extents
-        x, y = event.x, event.y
-        a2 = self.Winst.get_adapter(a)
-        a2.drag_slice(x,y)
-        self.dynamic_update()
-
     def drag_zoom(self, event):
         """the drag callback in zoom mode"""
 
@@ -663,79 +428,6 @@ class NavigationToolbar2(object):
                 x, lastx = x1, x2
 
             self.draw_rubberband(event, x, y, lastx, lasty)
-
-    def release_axis(self, event):
-        """the release mouse button callback in axid mode"""
-        #print "release slice..."
-        if self._button_pressed is None:
-            return
-        self.canvas.mpl_disconnect(self._idDrag)
-        self._idDrag = self.canvas.mpl_connect(
-            'motion_notify_event', self.mouse_move)
-        if not self._xypress:
-            return
-        self._xypress = []
-        self._button_pressed = None
-        self.push_current()
-        self.release(event)
-        self.canvas.draw()
-
-
-    def release_view(self, event):
-        """the release mouse button callback in axid mode"""
-        #print "release slice..."
-        if self._button_pressed is None:
-            return
-        self.canvas.mpl_disconnect(self._idDrag)
-        self._idDrag = self.canvas.mpl_connect(
-            'motion_notify_event', self.mouse_move)
-        if not self._xypress:
-            return
-        self._xypress = []
-        self._button_pressed = None
-        self.push_current()
-        self.release(event)
-        self.canvas.draw()
-
-
-    def release_source(self, event):
-        """the release mouse button callback in axid mode"""
-        #print "release slice..."
-        if self._button_pressed is None:
-            return
-        self.canvas.mpl_disconnect(self._idDrag)
-        self._idDrag = self.canvas.mpl_connect(
-            'motion_notify_event', self.mouse_move)
-        if not self._xypress:
-            return
-        self._xypress = []
-        self._button_pressed = None
-        self.push_current()
-        self.release(event)
-        self.canvas.draw()
-
-
-    def release_slice(self, event):
-        """the release mouse button callback in slice mode"""
-        #print "release slice..."
-        if self._button_pressed is None:
-            return
-        self.canvas.mpl_disconnect(self._idDrag)
-        self._idDrag = self.canvas.mpl_connect(
-            'motion_notify_event', self.mouse_move)
-        if not self._xypress:
-            return
-        for cur_xypress in self._xypress:
-            lastx, lasty, a, i, lim = cur_xypress
-            a2 = self.Winst.get_adapter(a)
-            a2.release_slice()
-            print "end slice:", a2.view.get_slice()
-        self._xypress = []
-        self._button_pressed = None
-        self.push_current()
-        self.release(event)
-        self.draw()
-
     def release_zoom(self, event):
         """the release mouse button callback in zoom to rect mode"""
         for zoom_id in self._ids_zoom:
@@ -862,7 +554,120 @@ class NavigationToolbar2(object):
 
         self.push_current()
         self.release(event)
+    def _switch_on_zoom_mode(self, event):
+        self._zoom_mode = event.key
+        self.mouse_move(event)
+    def _switch_off_zoom_mode(self, event):
+        self._zoom_mode = None
+        self.mouse_move(event)
 
+
+    # GUI
+    def _init_toolbar(self):
+        """
+        This is where you actually build the GUI widgets (called by
+        __init__).  The icons ``home.xpm``, ``back.xpm``, ``forward.xpm``,
+        ``hand.xpm``, ``zoom_to_rect.xpm`` and ``filesave.xpm`` are standard
+        across backends (there are ppm versions in CVS also).
+
+        You just need to set the callbacks
+
+        home         : self.home
+        back         : self.back
+        forward      : self.forward
+        hand         : self.pan
+        zoom_to_rect : self.zoom
+        filesave     : self.save_figure
+
+        You only need to define the last one - the others are in the base
+        class implementation.
+
+        """
+        raise NotImplementedError
+    def set_message(self, s): pass
+    def draw_rubberband(self, event, x0, y0, x1, y1): pass
+    def save_figure(self, *args): raise NotImplementedError
+    def set_cursor(self, cursor): pass
+    def set_history_buttons(self): pass
+    # Draw the canvas when idle
+    def dynamic_update(self): pass
+
+
+    # Undo/Redo
+    def back(self, *args):
+        """move back up the view lim stack"""
+        self._views2.back()
+        self._views.back()
+        self._positions.back()
+        self.set_history_buttons()
+        self._update_view()
+    def forward(self, *args):
+        """Move forward in the view lim stack"""
+        self._views2.forward()
+        self._views.forward()
+        self._positions.forward()
+        self.set_history_buttons()
+        self._update_view()
+    def home(self, *args):
+        """Restore the original view"""
+        self._views2.home()
+        self._views.home()
+        self._positions.home()
+        self.set_history_buttons()
+        self._update_view()
+    def push_current(self):
+        """push the current view limits and position onto the stack"""
+        vws = []
+        lims = []
+        pos = []
+        for a in self.canvas.figure.get_axes():
+            a2 = self.Winst.get_adapter(a)
+            vws.append(a2.view_to_tuple())
+            xmin, xmax = a.get_xlim()
+            ymin, ymax = a.get_ylim()
+            lims.append((xmin, xmax, ymin, ymax))
+            # Store both the original and modified positions
+            pos.append((
+                a.get_position(True).frozen(),
+                a.get_position().frozen()))
+        self._views2.push(vws)
+        self._views.push(lims)
+        self._positions.push(pos)
+        self.set_history_buttons()
+    # Reset the stack
+    def update(self):
+        self._views2.clear()
+        self._views.clear()
+        self._positions.clear()
+        self.set_history_buttons()
+    # Set the view from current stack position
+    def _update_view(self):
+        wvs = self._views2()
+        if wvs is None:
+            return
+        lims = self._views()
+        if lims is None:
+            return
+        pos = self._positions()
+        if pos is None:
+            return
+        for i, a in enumerate(self.canvas.figure.get_axes()):
+            a2 = self.Winst.get_adapter(a)
+            a2.view_from_tuple(wvs[i])
+            xmin, xmax, ymin, ymax = lims[i]
+            a.set_xlim((xmin, xmax))
+            a.set_ylim((ymin, ymax))
+            # Restore both the original and modified positions
+            a.set_position(pos[i][0], 'original')
+            a.set_position(pos[i][1], 'active')
+
+        self.canvas.draw_idle()
+
+
+    def debug(self, *args):
+        self.Winst.print_debug()
+
+    #TODO: in this case can just replace calls here with self.canvas.draw_idle()
     def draw(self):
         """Redraw the canvases, update the locators"""
         for a in self.canvas.figure.get_axes():
@@ -880,85 +685,6 @@ class NavigationToolbar2(object):
                 loc.refresh()
         self.canvas.draw_idle()
 
-    def _update_view(self):
-        """Update the viewlim and position from the view and
-        position stack for each axes
-        """
-
-        lims = self._views()
-        if lims is None:
-            return
-        pos = self._positions()
-        if pos is None:
-            return
-        for i, a in enumerate(self.canvas.figure.get_axes()):
-            xmin, xmax, ymin, ymax = lims[i]
-            a.set_xlim((xmin, xmax))
-            a.set_ylim((ymin, ymax))
-            # Restore both the original and modified positions
-            a.set_position(pos[i][0], 'original')
-            a.set_position(pos[i][1], 'active')
-
-        self.canvas.draw_idle()
-
-    def save_figure(self, *args):
-        """Save the current figure"""
-        raise NotImplementedError
-
-    def set_cursor(self, cursor):
-        """
-        Set the current cursor to one of the :class:`Cursors`
-        enums values
-        """
-        pass
-
-    def update(self):
-        """Reset the axes stack"""
-        self._views.clear()
-        self._positions.clear()
-        self.set_history_buttons()
-
-    def zoom(self, *args):
-        """Activate zoom to rect mode"""
-        if self._active == 'ZOOM':
-            self._active = None
-        else:
-            self._active = 'ZOOM'
-
-        if self._idPress is not None:
-            self._idPress = self.canvas.mpl_disconnect(self._idPress)
-            self.mode = ''
-
-        if self._idRelease is not None:
-            self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
-            self.mode = ''
-
-        if self._active:
-            self._idPress = self.canvas.mpl_connect('button_press_event',
-                                                    self.press_zoom)
-            self._idRelease = self.canvas.mpl_connect('button_release_event',
-                                                      self.release_zoom)
-            self.mode = 'zoom rect'
-            self.canvas.widgetlock(self)
-        else:
-            self.canvas.widgetlock.release(self)
-
-        for a in self.canvas.figure.get_axes():
-            a.set_navigate_mode(self._active)
-
-        self.set_message(self.mode)
-
-    def set_history_buttons(self):
-        """Enable or disable back/forward button"""
-        pass
-
-    def axis_menu(self, event, a2):
-        """Show a popup menu to choose the axis"""
-        pass
-
-    def source_menu(self, a2, event):
-        """Show a popup menu to choose the source"""
-        pass
 
 
 
@@ -1003,6 +729,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
 
     def set_cursor(self, cursor):
         self.window.configure(cursor=cursord[cursor])
+        #self.window.configure(cursor="tcross")
 
     def _Button(self, text, file, command, extension='.ppm'):
         img_file = os.path.join(rcParams['datapath'], 'images', file + extension)
@@ -1048,8 +775,8 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         canvas.get_tk_widget().pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
 
     def save_figure(self, *args):
-        import Tkinter.tkFileDialog
-        import Tkinter.tkMessageBox
+        import tkFileDialog
+        import tkMessageBox
         filetypes = self.canvas.get_supported_filetypes().copy()
         default_filetype = self.canvas.get_default_filetype()
 
@@ -1074,7 +801,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         initialdir = rcParams.get('savefig.directory', '')
         initialdir = os.path.expanduser(initialdir)
         initialfile = self.canvas.get_default_filename()
-        fname = Tkinter.tkFileDialog.asksaveasfilename(
+        fname = tkFileDialog.asksaveasfilename(
             master=self.window,
             title='Save the figure',
             filetypes=tk_filetypes,
@@ -1096,7 +823,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
                 # This method will handle the delegation to the correct type
                 self.canvas.print_figure(fname)
             except Exception as e:
-                Tkinter.tkMessageBox.showerror("Error saving file", str(e))
+                tkMessageBox.showerror("Error saving file", str(e))
 
     def set_active(self, ind):
         self._ind = ind
@@ -1118,49 +845,74 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         # legacy method; new method is canvas.draw_idle
         self.canvas.draw_idle()
 
-    def axis_menu(self, event, a2):
+    def axis_menu(self, event):
         """Show a popup menu to choose the axis"""
         pmenu = Tk.Menu(self)
 
         x = event.guiEvent.x_root
         y = event.guiEvent.y_root
 
+        a = self._last_axis
+        a2 = self.Winst.get_adapter(a)
+
         for i in range(3):
             axes_string = WM.MINOR_AXES[i][0]+WM.MINOR_AXES[i][1]
             # Calling the redraw is necessary *immediately*,
             # a bug with with internal state variables or event handling..?
             def f (i=i):
-                #TODO: can extract axis from _xypress ?
                 a2.change_projection(i)
                 self.dynamic_update()
             pmenu.add_command(label=axes_string, compound=Tk.LEFT, command=f)
 
         pmenu.tk_popup(int(x),int(y),0)
 
+    def sources_menu(self, event):
+        """Show a popup menu to choose the WM sources"""
+        select_sources_menu = Tk.Menu(self)
 
-    def view_menu(self, a2, event):
+        x = event.guiEvent.x_root
+        y = event.guiEvent.y_root
+
+        source_menu = []
+        for i in range(len(self.Winst.sources)):
+            source_menu.append(Tk.Menu(self, tearoff=0))
+            select_sources_menu.add_cascade(label=str(i), menu=source_menu[-1])
+            for j in range(len(self.Winst.all_sources)):
+                def f (i=i,j=j):
+                    self.Winst.change_source(i,j)
+                    self.canvas.draw_idle()
+                source_menu[-1].add_radiobutton(label=str(j)+" ("+str(self.Winst.all_sources[j])+")", command=f )
+
+        select_sources_menu.tk_popup(int(x),int(y),0)
+
+    def view_menu(self, event):
         """Show a popup menu to choose the WM view"""
         smenu = Tk.Menu(self)
 
         x = event.guiEvent.x_root
         y = event.guiEvent.y_root
 
+        a = self._last_axis
+        a2 = self.Winst.get_adapter(a)
+
         wm_views = WM.TEMPLATES.keys()
         for i,wm_view in zip(range(len(wm_views)),wm_views):
-            def f (wm_view=wm_view):
-                self.Winst.change_template(wm_view, a2)
+            def f (wm_view=wm_view,a=a):
+                self.Winst.change_template(wm_view, a)
                 self.canvas.draw()
             smenu.add_command(label=wm_view, compound=Tk.LEFT, command=f)
 
         smenu.tk_popup(int(x),int(y),0)
 
-
-    def source_menu(self, a2, event):
-        """Show a popup menu to choose the image source"""
+    def source_menu(self, event):
+        """Show a popup menu to choose the view's image source"""
         smenu = Tk.Menu(self)
 
         x = event.guiEvent.x_root
         y = event.guiEvent.y_root
+
+        a = self._last_axis
+        a2 = self.Winst.get_adapter(a)
 
         sources = self.Winst.get_sources()
         for i,source in zip(range(len(sources)),sources):

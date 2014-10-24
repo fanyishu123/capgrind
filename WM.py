@@ -1,6 +1,7 @@
 
 import numpy
 import matplotlib
+import os
 
 #TODO: This can be made a lot simpler, do it when it works
 RL_DIM = {0 : 5.5, 1 : 1.1, 2 : 1.1}
@@ -16,7 +17,7 @@ for i in axes:
     MINOR_AXES[i] = (AXES[s[0]],AXES[s[1]])
     MINOR_AXES_IND[i] = (s[0], s[1])
 
-image_kwargs = dict(interpolation='nearest')
+
 
 class T :
     N = 4
@@ -29,7 +30,9 @@ class T :
 # TODO: Add explicit erros for faulty calls and structures, these can be hard to debug otherwise
 class WM_instance(object):
 
-    def __init__(self, template_name, template, sources, all_sources, fig=None):
+    def __init__(self, gui, template_name, template, sources, all_sources, fig=None):
+
+        self.gui = gui
 
         if fig == None:
             self.fig = matplotlib.figure.Figure(figsize=(5,4), dpi=100)
@@ -38,7 +41,6 @@ class WM_instance(object):
             self.fig = fig
 
         self.all_sources = all_sources
-        self.sources = numpy.array(sources)
         self.template_name = template_name
 
         grid_size = template.shape[0] * template.shape[1]
@@ -47,22 +49,32 @@ class WM_instance(object):
         n_template_sources = numpy.unique(template[:,:,T.SOURCE]).size
 
         #self.sources = numpy.array([None]*n_sources)
-        self.views = numpy.array((),dtype=object)
+        #self.views = numpy.array((),dtype=object)
+
+        self.sources = numpy.array(sources)
         self.axes = numpy.array((),dtype=object)
+        self.adapters = numpy.array((),dtype=object)
         # X is a matrix that determines which views a source controls
-        self.X_source_view = numpy.zeros((n_sources,grid_size), dtype=bool)
-        self.axes_to_axes_adapter = dict()
+        self.X_source_adapter = numpy.zeros((n_sources,grid_size), dtype=bool)
 
         self.set_template(template)
 
 
     def change_template(self, new_template_name, action_axis):
         print "changing to", new_template_name
-        action_view = self.get_view(action_axis)
-        template, sources = transition(self.sources, self.template_name, new_template_name,
-                                       self.view_to_source_ind(action_view),
-                                       action_view)
-        self.__init__(new_template_name, template, sources, self.all_sources, self.fig)
+        action_adapter = self.get_adapter(action_axis)
+        template, sources = action_transition(self.sources, self.template_name, new_template_name,
+                                       self.adapter_to_source_ind(action_adapter), action_adapter)
+        self.__init__(self.gui, new_template_name, template, sources, self.all_sources, self.fig)
+        self.gui.update_WM_menu()
+
+    def change_template_multiple(self, new_template_name, n_new_sources, use_sources = None):
+        use_sources = self.sources if (use_sources == None) else use_sources
+        print "changing to", new_template_name, "with", n_new_sources, "sources"
+        template, sources = transition(use_sources, self.template_name, new_template_name,
+                                       n_new_sources)
+        self.__init__(self.gui, new_template_name, template, sources, self.all_sources, self.fig)
+        self.gui.update_WM_menu()
 
     def set_template(self, template):
         rows, cols, props = template.shape
@@ -74,35 +86,20 @@ class WM_instance(object):
                 norm_ind = template[x, y, T.NORM]
                 slice_ind = template[x, y, T.SLICE]
                 print "Adding grid item", x,y, "with norm",  norm_ind, "and source", self.sources[source_ind]
+                source = self.sources[source_ind]
                 ax = self.fig.add_subplot(rows,cols,i+1)
-                view = View(norm_ind, slice_ind, 0)
-                view.read_source_properties(self.sources[source_ind])
-                self.add_connection(ax,view,source_ind)
-                ax2 = AxesAdapter(ax, view, self)
-                self.axes_to_axes_adapter[ax] = ax2
-                ax2.reset_image()
-
-    def add_connection(self, axis, view, source_ind):
-        self.axes = numpy.append(self.axes,axis)
-        self.views = numpy.append(self.views,view)
-        self.X_source_view[source_ind,self.view_to_ind(view)] = True
-        #print self.X_source_view
+                ax2 = AxesAdapter(ax, self, (norm_ind, slice_ind, 0))
+                #view = View(norm_ind, slice_ind, 0)
+                #TODO: view.read_source_properties(self.sources[source_ind])
+                self.add_connection(ax,ax2,source_ind)
+                ax2.reset()
 
 
-    # These stupid helpers allow changing the underlying datatype later
+    def add_connection(self, axis, adapter, source_ind):
+        self.axes = numpy.append(self.axes, axis)
+        self.adapters = numpy.append(self.adapters, adapter)
+        self.X_source_adapter[source_ind,self.adapter_to_ind(adapter)] = True
 
-    def ind_to_view(self, ind):
-        return self.views[ind]
-
-    def view_to_ind(self, view):
-        return numpy.nonzero(self.views==view)[0][0]
-
-    def ind_to_source(self, ind):
-        return self.sources[ind]
-
-    def view_to_source_ind(self, view):
-        source_flag = self.X_source_view[:,self.view_to_ind(view)]
-        return numpy.nonzero(source_flag==True)[0][0]
 
     def ind_to_axis(self, ind):
         return self.axes[ind]
@@ -110,88 +107,183 @@ class WM_instance(object):
     def axis_to_ind(self, axis):
         return numpy.nonzero(self.axes==axis)[0][0]
 
-    def get_view(self, axis):
-        return self.views[self.axis_to_ind(axis)]
+    def get_axis(self, adapter):
+        return self.axes[self.adapter_to_ind(adapter)]
 
-    def get_axis(self, view):
-        return self.axes[self.view_to_ind(view)]
 
-    def get_source(self, view):
-        source_flag = self.X_source_view[:,self.view_to_ind(view)]
+    def ind_to_adapter(self, ind):
+        return self.adapters[ind]
+
+    def adapter_to_ind(self, adapter):
+        return numpy.nonzero(self.adapters==adapter)[0][0]
+
+    def get_adapter(self, axis):
+        return self.adapters[self.axis_to_ind(axis)]
+
+
+    def ind_to_source(self, ind):
+        return self.sources[ind]
+
+    def source_to_ind(self, source):
+        return numpy.nonzero(self.sources==source)[0][0]
+
+    def get_source(self, adapter):
+        source_flag = self.X_source_adapter[:,self.adapter_to_ind(adapter)]
         return self.sources[source_flag][0]
+
+    def adapter_to_source_ind(self, adapter):
+        source_flag = self.X_source_adapter[:,self.adapter_to_ind(adapter)]
+        return numpy.nonzero(source_flag==True)[0][0]
 
     def get_sources(self):
         return self.sources
 
-    def get_adapter(self, axis):
-        return self.axes_to_axes_adapter[axis]
 
-    def change_views_source(self, view, new_source_index):
-        view_index = self.view_to_ind(view)
-        cur_source_index = self.view_to_source_ind(view)
-        self.X_source_view[cur_source_index,view_index] = False
-        self.X_source_view[new_source_index,view_index] = True
-        view.read_source_properties(self.get_source(view))
+    def change_adapters_source(self, adapter, new_source_index):
+        adapter_index = self.adapter_to_ind(adapter)
+        cur_source_index = self.adapter_to_source_ind(adapter)
+        self.X_source_adapter[cur_source_index,adapter_index] = False
+        self.X_source_adapter[new_source_index,adapter_index] = True
+        adapter.reset()
 
     def change_source(self, source_index, new_source_from_index):
-        views_flag = self.X_source_view[source_index,:]
+        adapters_flag = self.X_source_adapter[source_index,:]
         self.sources[source_index] = self.all_sources[new_source_from_index]
-        for view in self.views[views_flag]:
-            ax = self.axes[self.view_to_ind(view)]
-            view.read_source_properties(self.get_source(view))
-            self.axes_to_axes_adapter[ax].reset_image()
+        for adapter in self.adapters[adapters_flag]:
+            adapter.reset()
 
-    def get_shared_axes(self, view):
-        source_index = self.view_to_source_ind(view)
-        axes = numpy.array((),dtype=object)
-        views_flag = self.X_source_view[source_index,:]
-        for shared_axis in self.axes[views_flag]:
-            axes = numpy.append(axes, shared_axis)
-        return axes
+    def get_shared_adapters(self, adapter):
+        source_index = self.adapter_to_source_ind(adapter)
+        adapters_flag = self.X_source_adapter[source_index,:]
+        return self.adapters[adapters_flag]
+
+    def get_adapters(self, source):
+        source_index = self.source_to_ind(source)
+        adapters_flag = self.X_source_adapter[source_index,:]
+        return self.adapters[adapters_flag]
+
 
     def get_figure(self):
         return self.fig
 
     def print_debug(self):
-        pass
+        for ax2 in self.adapters:
+            print "debug:"
+            print ax2.ax.get_position()
+            #print ax2.ax.get_position(True)
 
-class AxesAdapter(object):
 
-    def __init__(self, ax, view, Winst):
+
+class View(object):
+
+    def __init__(self,  norm, slice, b_value):
+        self.norm = norm
+        self.slice = slice
+        self.b_value = b_value
+
+    def n_slices(self):
+        return self.smax+1
+
+    def set_slice(self, num):
+        self.slice = min(max(num, self.smin), self.smax)
+
+    def n_bvalues(self):
+        return self.bmax+1
+
+    def set_bvalue(self, num):
+        self.b_value = min(max(num, self.bmin), self.bmax)
+
+    def change_projection(self,norm_i):
+        self.norm = norm_i
+        self.smax = self.shape[self.norm]-1
+        self.slice = 10
+
+    def toggle_projection(self):
+        self.change_projection((self.norm+1)%3)
+
+    def get_axes_labels(self):
+        return (MINOR_AXES[self.norm][0], MINOR_AXES[self.norm][1])
+
+    def get_axes_aspect(self):
+        x_mm_dim = RL_DIM[MINOR_AXES_IND[self.norm][1]]
+        y_mm_dim = RL_DIM[MINOR_AXES_IND[self.norm][0]]
+        return (x_mm_dim/y_mm_dim)
+
+    def update_source_properties(self,source):
+        if source != None:
+            self.shape = source.get_shape()
+            self.smin, self.smax = 0, self.shape[self.norm]-1
+            self.bmin, self.bmax = 0, self.shape[-1]-1
+        else:
+            self.shape = (0,)*4
+            self.smin, self.smax = 0,0
+
+
+class AxesAdapter(View):
+
+    def __init__(self, ax, Winst, view_tuple, source = None):
         self.ax = ax
-        self.view = view
         self.Winst = Winst
+        View.__init__(self, *view_tuple)
+        self.update_source_properties(source)
+        #super(AxesAdapter,self).__init__()
+
+    def reset(self):
+        self.update_source_properties(self.Winst.get_source(self))
+        self.reset_image()
+
+
+    def has_image(self):
+        return self.Winst.get_source(self) != None
 
     def reset_image(self):
         a = self.ax
-        view = self.view
-        ind = self.Winst.view_to_source_ind(view)
-        # Initialization
+        ind = self.Winst.adapter_to_source_ind(self)
         a.clear()
         if self.has_image():
-            a.imshow(self.get_data(), origin='lower', vmin = view.v_min, vmax = view.v_max, **image_kwargs)
-            a.set_aspect(view.get_axes_aspect())
+            kwargs = self.Winst.get_source(self).kwargs
+            a.imshow(self.get_data(), origin='lower', **kwargs)
+            a.set_aspect(self.get_axes_aspect())
         else:
-            a.text(0.5, 0.5, "No Image", transform=a.transAxes, fontsize=10, color='red', style='italic',
+            a.text(0.5, 0.5, "No Image", transform=a.transAxes, fontsize=10, color='red',style='italic',
                    clip_box=(0.0,0.0,1.0,1.0), clip_on=True, va='center', ha='center')
         a.text(0.05, 0.95, ind, transform=a.transAxes, fontsize=14, color='green', fontweight='bold',
                va='top')
         a.set_xticks([])
         a.set_yticks([])
-        x,y = view.get_axes_labels()
+        x,y = self.get_axes_labels()
         a.set_xlabel(x)
         a.set_ylabel(y)
-        # Source indication
 
     def update_image(self):
         if self.has_image():
             im = self.ax.get_images()[0]
             im.set_data(self.get_data())
-            im.norm.vmin,im.norm.vmax = self.view.v_min, self.view.v_max
+            kwargs = self.Winst.get_source(self).kwargs
+            im.norm.vmin,im.norm.vmax = kwargs['vmin'], kwargs['vmax']
 
-    def toggle_projection(self):
-        self.view.toggle_projection()
-        self.reset_image()
+    def get_data(self):
+        return self.Winst.get_source(self).get_slice(self.norm,
+                                                          self.slice, self.b_value)
+
+    def get_shape(self):
+        return self.shape
+
+    def get_point(self, cur_x, cur_y):
+        shape = self.shape[:3]
+        major = self.norm
+        minor1, minor2 = MINOR_AXES_IND[major]
+
+        x = min(max(cur_x, 0), shape[minor1])
+        y = min(max(cur_y, 0), shape[minor2])
+        point = [0,0,0]
+        point[minor1] = x
+        point[minor2] = y
+        point[major] = self.slice
+        return point
+
+    def update_slice_from_point(self, point):
+        self.set_slice(point[self.norm])
 
 
     def start_crosshair(self, start_x, start_y, event):
@@ -201,35 +293,20 @@ class AxesAdapter(object):
         cur_x, cur_y = event.xdata, event.ydata
         point = self.get_point(cur_x, cur_y)
 
-        for axis in self.Winst.get_shared_axes(self.view):
-            a2 = self.Winst.get_adapter(axis)
+        for a2 in self.Winst.get_shared_adapters(self):
             a2.draw_crosshair(point)
             a2.update_slice_from_point(point)
             a2.update_image()
 
     def end_crosshair(self):
-        for axis in self.Winst.get_shared_axes(self.view):
-            a2 = self.Winst.get_adapter(axis)
+        for a2 in self.Winst.get_shared_adapters(self):
             a2.clear_crosshair()
-
-    def get_point(self, cur_x, cur_y):
-        shape = self.view.shape[:3]
-        major = self.view.norm
-        minor1, minor2 = MINOR_AXES_IND[major]
-
-        x = min(max(cur_x, 0), shape[minor1])
-        y = min(max(cur_y, 0), shape[minor2])
-        point = [0,0,0]
-        point[minor1] = x
-        point[minor2] = y
-        point[major] = self.view.get_slice()
-        return point
 
     def draw_crosshair(self, point):
 
         x1, x2 = self.ax.get_xlim()
         y1, y2 = self.ax.get_ylim()
-        major = self.view.norm
+        major = self.norm
         minor1, minor2 = MINOR_AXES_IND[major]
         #print "drawing", self.view, "coord", point[minor1], point[minor2]
         #x1, y1, x2, y2 = 0,0,shape[minor1],shape[minor2]
@@ -242,8 +319,6 @@ class AxesAdapter(object):
         for line in self.ax.lines:
             del self.ax.lines[:]
 
-    def update_slice_from_point(self, slice):
-        self.view.set_slice(slice[self.view.norm])
 
     def start_pan(self, start_x, start_y, event_button):
         self._button_pressed = event_button
@@ -259,7 +334,7 @@ class AxesAdapter(object):
     def start_slice(self, start_x, start_y, event):
         self.start_x = start_x
         self.start_y = start_y
-        self.start_slice_n = self.view.get_slice()
+        self.start_slice_n = self.slice
 
     def drag_slice(self, event):
         cur_x, cur_y = event.x, event.y
@@ -268,18 +343,19 @@ class AxesAdapter(object):
         x1, y1, x2, y2 = self.ax.bbox.extents
         height = y2 - y1
         rel = (self.start_y - cur_y)/height
-        slice = self.start_slice_n+rel*self.view.n_slices()
-        self.view.set_slice(slice)
+        slice = self.start_slice_n+rel*self.n_slices()
+        self.set_slice(slice)
         self.update_image()
 
     def end_slice(self):
         self.start_x, self.start_y = 0,0
         self.start_slice_n = 0
 
+
     def start_bvalue(self, start_x, start_y, event):
         self.start_x = start_x
         self.start_y = start_y
-        self.start_bvalue_n = self.view.get_bvalue()
+        self.start_bvalue_n = self.b_value
 
     def drag_bvalue(self, event):
         cur_x, cur_y = event.x, event.y
@@ -288,37 +364,36 @@ class AxesAdapter(object):
         x1, y1, x2, y2 = self.ax.bbox.extents
         height = y2 - y1
         rel = (self.start_y - cur_y)/height
-        bvalue = self.start_bvalue_n+rel*self.view.n_bvalues()
-        self.view.set_bvalue(bvalue)
+        bvalue = self.start_bvalue_n+rel*self.n_bvalues()
+        self.set_bvalue(bvalue)
         self.update_image()
 
     def end_bvalue(self):
         self.start_x, self.start_y = 0,0
         self.start_bvalue_n = 0
 
+
+    def toggle_projection(self):
+        super(AxesAdapter,self).toggle_projection()
+        self.reset_image()
+
     def change_projection(self, norm_ind):
-        self.view.change_projection(norm_ind)
+        super(AxesAdapter,self).change_projection(norm_ind)
         self.reset_image()
 
     def change_source(self, ind):
-        self.Winst.change_views_source(self.view,ind)
+        self.Winst.change_adapters_source(self,ind)
         self.reset_image()
 
-    def get_data(self):
-        return self.Winst.get_source(self.view).get_slice(self.view.norm,
-                                                          self.view.slice, self.view.b_value)
-
-    def has_image(self):
-        return self.Winst.get_source(self.view) != None
 
     def get_display_str(self, cur_x, cur_y):
-        d = tuple(self.get_point(cur_x, cur_y))+(self.view.get_bvalue(),)+tuple(self.get_shape())
+        d = tuple(self.get_point(cur_x, cur_y))+(self.b_value,)+tuple(self.shape)
         s = "%dx%dx%dx(%d)/%dx%dx%dx(%d)" % d
         return s
 
     def get_display_minor_str(self, cur_x, cur_y):
-        shape = self.view.shape[:3]
-        major = self.view.norm
+        shape = self.shape[:3]
+        major = self.norm
         minor1, minor2 = MINOR_AXES_IND[major]
 
         s = ["","","",""]
@@ -326,102 +401,43 @@ class AxesAdapter(object):
         s[minor1] = "[%d-%d]x" % (x1,x2)
         x1, x2 = self.ax.get_ylim()
         s[minor2] = "[%d-%d]x" % (x1,x2)
-        s[major] = "%dx"%int(self.view.get_slice())
-        s[-1] = "(%d)"%int(self.view.get_bvalue())
+        s[major] = "%dx"%int(self.slice)
+        s[-1] = "(%d)"%int(self.b_value)
 
         s = "".join(s)
-        a = "/%dx%dx%dx(%d)" % tuple(self.get_shape())
+        a = "/%dx%dx%dx(%d)" % tuple(self.shape)
         return s+a
 
-    def get_shape(self):
-        return self.view.shape
 
     def view_to_tuple(self):
-        return (self.view.norm, self.view.slice, self.view.b_value)
+        return (self.norm, self.slice, self.b_value)
 
     def view_from_tuple(self, t):
-        self.view.__init__(*t)
+        View.__init__(self, *t)
         self.update_image()
 
-
-class View(object):
-
-    def __init__(self,  norm, slice, b_value):
-        self.norm = norm
-        self.slice = slice
-        self.b_value = b_value
-
-    def n_slices(self):
-        return self.smax+1
-
-    def n_bvalues(self):
-        return self.bmax+1
-
-    def set_slice(self, num):
-        self.slice = min(max(num, self.smin), self.smax)
-
-    def get_slice(self):
-        return self.slice
-
-    def set_bvalue(self, num):
-        self.b_value = min(max(num, self.bmin), self.bmax)
-
-    def get_bvalue(self):
-        return self.b_value
-
-    def change_projection(self,norm_i):
-        self.norm = norm_i
-        self.smax = self.shape[self.norm]-1
-        self.set_slice(10)
-
-    def toggle_projection(self):
-        self.change_projection((self.norm+1)%3)
-
-    def get_axes_labels(self):
-        return (MINOR_AXES[self.norm][0], MINOR_AXES[self.norm][1])
-
-    def get_axes_aspect(self):
-        x_mm_dim = RL_DIM[MINOR_AXES_IND[self.norm][1]]
-        y_mm_dim = RL_DIM[MINOR_AXES_IND[self.norm][0]]
-        #return (y_mm_dim/x_mm_dim)
-        return (x_mm_dim/y_mm_dim)
-        #return 1.0
-
-    def read_source_properties(self,source):
-        if source != None:
-            self.shape = source.get_shape()
-            self.smin, self.smax = 0, self.shape[self.norm]-1
-            self.bmin, self.bmax = 0, self.shape[-1]-1
-            self.v_min, self.v_max = source.v_min(), source.v_max()
-        else:
-            self.shape = (0,)*4
-            self.smin, self.smax = 0,0
-            self.v_min, self.v_max = 0,0
 
 
 class Image_source(object):
 
     """ Do not directly access attributes, I may add all sorts of cool hacks to getters/setters
     to speed image lookups"""
+    kws = {'interpolation' : {'Nearest' : 'nearest'},
+         'cmap' : {'Greyscale' : 'gray', 'Jet' : 'jet', 'Blue monotone' : 'Blues_r'}}
 
     def __init__(self, fn):
-        self.fn = fn
         self.image = numpy.load(fn)
+        self.fn = os.path.basename(fn)
         self.shape = self.image.shape
         self.vmin = self.image.min()
         self.vmax = self.image.max()
+        self.kwargs = dict(interpolation='nearest', cmap='jet', vmin=self.vmin, vmax=self.vmax)
 
     def __str__(self):
         return self.fn
 
     def get_shape(self):
         return self.shape
-
-    def v_min(self):
-        return self.vmin
-
-    def v_max(self):
-        return self.vmax
 
     def get_slice(self, slice_index, slice_value, b_value):
         d = 4
@@ -431,6 +447,8 @@ class Image_source(object):
         # Image[:,...,:,slice_value,:,...,:,b_value]
         # slice_index --->
         return self.image[x].T
+
+
 
 def template_sources(template):
     return numpy.unique(template[:,:,T.SOURCE]).size
@@ -447,17 +465,11 @@ TEMPLATES = {
     ]),
     'SLICES' : numpy.array([
         [[1,0]]
-    ]),
-    'COMPARE_FULLSCREEN' : numpy.array([
-        [[1,0],
-         [1,1]]
-    ]),
-    'COMPARE_PROJECTION' : numpy.array([
-        [[1,0],
-         [1,1]]
-    ]),
+    ])
 }
 
+class UndefinedException(Exception):
+    pass
 
 #TODO: make this a table [from_template x to_template] filled with functions f_ij
 #TODO: then transition does f_ij(action_view)
@@ -466,107 +478,81 @@ TEMPLATES = {
 #TODO:  a composition of source filtering and returning a static template...
 #TODO:  many of these can be implemented functional programming style
 
-def transition(old_sources, from_template, to_template, source_ind=None, view=None):
 
-    transition_template = numpy.copy(TEMPLATES[to_template])
-    transition_sources = numpy.copy(old_sources)
+def action_transition(old_sources, from_template, to_template, source_ind, adapter):
 
-    # Make sure the input is valid
-    n1, n2 = len(old_sources), template_sources(TEMPLATES[from_template])
-    assert n1 == n2, "Got " + str(n1) + "sources, template (from) defines " + str(n2) + " sources."
-
-    # If the number of current sources and new sources are different, filter sources
-    n1, n2 = len(old_sources), template_sources(TEMPLATES[to_template])
-    if n1 != n2:
-        transition_sources, source_ind = filter_sources(transition_sources, source_ind, n1, n2)
-        n1 = len(transition_sources) # has changed
-        assert n1 == n2, "Template (to) defines " + str(n2) + "sources, filtered to " + str(n1) + " sources."
-        assert source_ind < n1, "Source index" + str(source_ind) + "/0-" + str((n1-1)) + "invalid."
+    transition_sources = single_out(old_sources, source_ind)
 
     undefined_error = "Transition from " + from_template + " to " + to_template + " not defined."
-    has_click_source = (view != None and source_ind != None)
-
-    if from_template == to_template:
-        pass
-
-    elif from_template == 'NONE':
-        pass
-
-    elif to_template == 'FULLSCREEN':
-        if has_click_source:
-            # T.ACTIVE, T.SOURCE, T.NORM, T.SLICE
-            transition_template[0,0,:] = (1,source_ind,view.norm,view.slice)
-        else:
-            pass
-
+    transition_template = numpy.copy(TEMPLATES[to_template])
+    if to_template == 'FULLSCREEN':
+        transition_template[0,0,:] = (1,0,adapter.norm,adapter.slice)
     elif to_template == 'PROJECTION':
-        #TODO: add the crosshair type knowledge here
-        pass
-
+        #TODO: if cliked from crosshair, add the crosshair type knowledge here
+        transition_template[0,adapter.norm,:] = (1,0,adapter.norm,adapter.slice)
     elif to_template == 'SLICES':
-        if has_click_source:
-            #TODO more precise maths
-            n = view.n_slices()
-            max_slices = 20
-            jump = numpy.ceil(n/max_slices).astype(int)
-            iter = max_slices-(max_slices%jump)
-            gs = numpy.ceil(numpy.sqrt(iter)).astype(int)
-            transition_template = numpy.zeros((gs,gs,T.N), dtype=int)
-            for i in range(iter):
-                x, y = i/gs, i%gs
-                if i < n:
-                    transition_template[x,y] = (1,source_ind,view.norm,i*jump)
-                else:
-                    transition_template[x,y] = (0,)*T.N
-        else:
-            raise RuntimeError, undefined_error
 
-    elif to_template in ('COMPARE_PROJECTION', 'COMPARE_FULLSCREEN'):
-        hack = to_template[8:]
-        transition_template = numpy.copy(TEMPLATES[hack])
-        for s in range(len(transition_sources)):
-            transition_template[s,:,T.SOURCE] = s
-            if source_ind != None:
-                if s == source_ind:
-                    if to_template == 'COMPARE_FULLSCREEN':
-                        transition_template[s,:,:] = (1,source_ind,view.norm,view.slice)
-                    if to_template == 'COMPARE_PROJECTION':
-                        transition_template[s,view.norm,:] = (1,source_ind,view.norm,view.slice)
-            if s != (len(transition_sources)-1):
-                transition_template = numpy.vstack((transition_template,numpy.copy(TEMPLATES[hack])))
+        n = adapter.n_slices()-1
+        side = 4
+        max_slices = side*side
+        slice_inds = [float(n)/(max_slices-1)*i for i in range(max_slices)]
+        slice_inds = numpy.round(slice_inds).astype(int)
 
-    elif from_template in ('COMPARE_PROJECTION', 'COMPARE_FULLSCREEN'):
-        pass
+        transition_template = numpy.zeros((side,side,T.N), dtype=int)
+        for i,slice in enumerate(slice_inds):
+            x, y = i/side, i%side
+            transition_template[x,y] = (1,0,adapter.norm,slice)
 
     else:
-        raise RuntimeError, undefined_error
+        raise UndefinedException(undefined_error)
 
     print transition_template, transition_sources
     return transition_template, transition_sources
 
-def filter_sources(sources, clicked_source_ind, n_from, n_to):
+
+def transition(old_sources, from_template, to_template, to_n):
+
+    transition_sources = numpy.copy(old_sources)
+    transition_sources = filter_sources(transition_sources, len(old_sources), to_n)
+    n = len(transition_sources) # should be equal to to_n
+
+    undefined_error = "Transition from " + from_template + " to " + to_template + " not defined."
+    transition_template = numpy.copy(TEMPLATES[to_template])
+    if to_template in ('PROJECTION', 'FULLSCREEN'):
+        for s in range(n):
+            transition_template[s,:,T.SOURCE] = s
+            if s != (len(transition_sources)-1):
+                transition_template = numpy.vstack((transition_template,
+                                                    numpy.copy(TEMPLATES[to_template])))
+    else:
+        raise UndefinedException(undefined_error)
+
+    print transition_template, transition_sources
+    return transition_template, transition_sources
+
+
+def single_out(sources, source_ind):
+    return numpy.array([sources[source_ind]])
+
+
+def filter_sources(sources, n_from, n_to):
     # If we need to add sources, append None as new sources
     if n_from < n_to:
         print "Appending sources..."
-        for i in range(n_to-n_from):
-            sources = numpy.append(sources, None)
+        sources = numpy.append(sources, [None]*(n_to-n_from))
         print sources
-        return sources, clicked_source_ind
+        return sources
     # If we need to remove sources, cut from the end
     elif n_from > n_to:
         print "Removing sources..."
-        cut_sources = sources[0:(n_from-n_to)]
-        clicked_source = sources[clicked_source_ind]
-        if clicked_source in cut_sources:
-            sources = cut_sources
-            print sources
-            return sources, numpy.nonzero(sources==clicked_source)[0][0]
-        # If the clicked source belongs to cut sources, put it in front and shift the rest
+        has_image = numpy.array([],dtype=object)
+        # Numpy doesn't overwrite comparison with None
+        for source in sources:
+            if source != None:
+                has_image = numpy.append(has_image,source)
+        if len(has_image) <= n_to:
+            return numpy.append(has_image, [None]*(n_to-len(has_image)))
         else:
-            new_sources = numpy.array([clicked_source],dtype=object)
-            if (n_from-n_to-1) > 0 :
-                new_sources = numpy.append(new_sources,sources[0:n_from-n_to-1])
-            print new_sources
-            return new_sources, 0
+            return has_image[:n_to]
     else:
-        pass
+        return sources

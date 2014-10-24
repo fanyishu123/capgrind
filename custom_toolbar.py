@@ -108,7 +108,7 @@ class NavigationToolbar2(object):
         (None, None, None, None),
         ('Subplots', 'Configure subplots', 'subplots', 'configure_subplots'),
         ('Save', 'Save the figure', 'filesave', 'save_figure'),
-        #('Debug', 'bind debug info here', 'filesave', 'debug'),
+        ('Debug', 'bind debug info here', 'filesave', 'debug'),
       )
 
     def __init__(self, canvas, Winst):
@@ -749,6 +749,10 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
 
         self.update()  # Make axes menu
 
+        self.message = Tk.StringVar(master=self)
+        self._message_label = Tk.Label(master=self, textvariable=self.message)
+        self._message_label.pack(side=Tk.TOP, fill=Tk.X, expand=Tk.NO)
+
         for text, tooltip_text, image_file, callback in self.toolitems:
             if text is None:
                 # spacer, unhandled in Tk
@@ -759,10 +763,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
                 if tooltip_text is not None:
                     ToolTip.createToolTip(button, tooltip_text)
 
-        self.message = Tk.StringVar(master=self)
-        self._message_label = Tk.Label(master=self, textvariable=self.message)
-        self._message_label.pack(side=Tk.RIGHT)
-        self.pack(side=Tk.BOTTOM, fill=Tk.X)
+        self.pack(side=Tk.BOTTOM, fill=Tk.X, expand=Tk.NO)
 
 
     def configure_subplots(self):
@@ -896,7 +897,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         a2 = self.Winst.get_adapter(a)
 
         wm_views = WM.TEMPLATES.keys()
-        for i,wm_view in zip(range(len(wm_views)),wm_views):
+        for i,wm_view in enumerate(wm_views):
             def f (wm_view=wm_view,a=a):
                 self.Winst.change_template(wm_view, a)
                 self.canvas.draw()
@@ -915,7 +916,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         a2 = self.Winst.get_adapter(a)
 
         sources = self.Winst.get_sources()
-        for i,source in zip(range(len(sources)),sources):
+        for i,source in enumerate(sources):
             def f (i=i):
                 a2.change_source(i)
                 self.canvas.draw()

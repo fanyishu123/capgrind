@@ -1,20 +1,23 @@
 #
 #   Modified standard toolbar for image manipulation tasks and image WM awareness
 #
-#   Copied from:
+#   Original source:
 #       matplotlib.backend_bases.NavigationToolbar2
 #       matplotlib.backends.backend_tkagg.NavigationToolbar2TkAgg
 #
-#   If one can live with the dual function pan/zoom, it should be possible to subclass this.
+#   If one can live with the excess and dual function pan/zoom, it may be possible to subclass the sources.
 #
+#   TODO: Make this into a sort of 'mini framework' for different types of buttons, including drag type
+#   TODO: Make a leaner rect zoom, as we can make many assumptions and constraints with these images.
 
-
+import os.path
 import matplotlib
 import matplotlib.cbook as cbook
 from matplotlib.figure import Figure
 from matplotlib.widgets import SubplotTool
 import matplotlib.backends.windowing as windowing
 from matplotlib.backends.backend_tkagg import ToolTip, FigureCanvasTkAgg, FigureManagerTkAgg
+import tkMessageBox
 
 import numpy as np
 
@@ -22,8 +25,8 @@ import six
 import Tkinter as Tk
 
 import WM
+from WM import NoPointException
 
-import os.path
 rcParams = matplotlib.rcParams
 
 class Cursors:
@@ -92,12 +95,13 @@ class NavigationToolbar2(object):
     #   name_of_method, # name of the method in NavigationToolbar2 to call
     # )
     toolitems = (
-        ('Sources', 'Select sources', 'move', 'wm_sources'),
+        ('Crosshair', 'Show a point in space', 'move', 'crosshair'),
+        ('Global zoom', 'Zoom to a point', 'move', 'gzoom'),
+        ('Slice', 'Pan through slices', 'move', 'gslice'),
+        ('B-value', 'Pan through b-values', 'move', 'bvalue'),
         ('View', 'Select view', 'move', 'wm_view'),
         ('Source', 'Select source', 'move', 'source'),
         ('Axis', 'Toggle Axis', 'move', 'axis'),
-        ('Crosshair', 'Show a point in space', 'move', 'crosshair'),
-        ('B-value', 'Pan through b-values', 'move', 'bvalue'),
         ('Slice', 'Pan through slices', 'move', 'slice'),
         ('Home', 'Reset original view', 'home', 'home'),
         ('Back', 'Back to  previous view', 'back', 'back'),
@@ -108,12 +112,11 @@ class NavigationToolbar2(object):
         (None, None, None, None),
         ('Subplots', 'Configure subplots', 'subplots', 'configure_subplots'),
         ('Save', 'Save the figure', 'filesave', 'save_figure'),
-        ('Debug', 'bind debug info here', 'filesave', 'debug'),
       )
 
-    def __init__(self, canvas, Winst):
+    def __init__(self, canvas, gui):
         self.canvas = canvas
-        self.Winst = Winst
+        self.gui = gui
         canvas.toolbar = self
         # a dict from axes index to a list of view limits
         self._views = cbook.Stack()
@@ -180,9 +183,10 @@ class NavigationToolbar2(object):
     def pan(self, *args): self.activate('pan')
     def slice(self, *args): self.activate('slice')
     def crosshair(self, *args): self.activate('crosshair')
+    def gslice(self, *args): self.activate('gslice')
+    def gzoom(self, *args): self.activate('gzoom')
     def bvalue(self, *args): self.activate('bvalue')
     def axis(self, *args): self.activate('axis')
-    def wm_sources(self, *args): self.activate('sources')
     def wm_view(self, *args): self.activate('view')
     def source(self, *args): self.activate('source')
 
@@ -210,10 +214,13 @@ class NavigationToolbar2(object):
                 self._last_axis = a
                 self.canvas.mpl_disconnect(self._idDrag)
                 # Can replaced by a subclass like structure
-                a2 = self.Winst.get_adapter(a)
+                a2 = a.adapter
                 if self._button_pressed == 1:
-                    getattr(a2, 'start_'+self._active)(x, y, event.button)
-                    self._idDrag = self.canvas.mpl_connect('motion_notify_event', getattr(self,'drag_'+self._active))
+                    try:
+                        getattr(a2, 'start_'+self._active)(x, y, event.button)
+                        self._idDrag = self.canvas.mpl_connect('motion_notify_event', getattr(self,'drag_'+self._active))
+                    except NoPointException:
+                        tkMessageBox.showerror("No point defined!", "No point defined for adapter "+str(a2))
                 elif self._button_pressed == 3:
                     #TODO: seperate zoom/pan into two buttons to get rid of the first if
                     if self._active == 'pan':
@@ -229,9 +236,10 @@ class NavigationToolbar2(object):
     def press_slice(self, event): self.press_canvas('slice', event, implements = (1,))
     def press_crosshair(self, event): self.press_canvas('crosshair', event, implements = (1,))
     def press_bvalue(self, event): self.press_canvas('bvalue', event, implements = (1,))
+    def press_gslice(self, event): self.press_canvas('gslice', event, implements = (1,))
+    def press_gzoom(self, event): self.press_canvas('gzoom', event, implements = (1,))
     # Call mode_menu
     def press_axis(self, event): self.press_canvas('axis', event, implements = (3,))
-    def press_sources(self, event): self.press_canvas('sources', event, implements = (3,))
     def press_view(self, event): self.press_canvas('view', event, implements = (3,))
     def press_source(self, event): self.press_canvas('source', event, implements = (3,))
 
@@ -240,10 +248,11 @@ class NavigationToolbar2(object):
     # General function to call when a mouse drag occurs in canvas
     def drag_canvas(self, event):
         a = self._last_axis
-        a2 = self.Winst.get_adapter(a)
+        a2 = a.adapter
         getattr(a2, 'drag_'+self._active)(event)
         self.display_message(event)
         self.dynamic_update()
+        self.gui.update_wm_tree()
     # When the tool is not active
     def mouse_move(self, event):
         if not event.inaxes or not self._active:
@@ -262,11 +271,11 @@ class NavigationToolbar2(object):
     def display_message(self, event):
         if event.inaxes and event.inaxes.get_navigate():
             try:
-                a2 = self.Winst.get_adapter(event.inaxes)
+                a2 = event.inaxes.adapter
                 if self._active in ('crosshair', None):
-                    s = a2.get_display_str(event.xdata, event.ydata)
+                    s = a2.get_display_str()
                 elif self._active in ('slice','bvalue','pan'):
-                    s = a2.get_display_minor_str(event.xdata, event.ydata)
+                    s = a2.get_display_minor_str()
                 else:
                     s = event.inaxes.format_coord(event.xdata, event.ydata)
             except (ValueError, OverflowError):
@@ -284,10 +293,11 @@ class NavigationToolbar2(object):
     def drag_pan(self, event): self.drag_canvas(event)
     def drag_slice(self, event): self.drag_canvas(event)
     def drag_bvalue(self, event): self.drag_canvas(event)
+    def drag_gslice(self, event): self.drag_canvas(event)
+    def drag_gzoom(self, event): self.drag_canvas(event)
     def drag_crosshair(self, event): self.drag_canvas(event)
     # Menu functions, overwritten in GUI's subclass
     def axis_menu(self, event): pass
-    def sources_menu(self, event): pass
     def view_menu(self, event): pass
     def source_menu(self, event): pass
 
@@ -305,7 +315,7 @@ class NavigationToolbar2(object):
         if not self._last_axis:
             return
         a = self._last_axis
-        a2 = self.Winst.get_adapter(a)
+        a2 = a.adapter
         # Menus do not implement this
         if hasattr(a2,'end_'+self._active):
             getattr(a2, 'end_'+self._active)()
@@ -320,16 +330,17 @@ class NavigationToolbar2(object):
     def release_pan(self, event): self.release_canvas(event)
     def release_slice(self, event): self.release_canvas(event)
     def release_crosshair(self, event): self.release_canvas(event)
+    def release_gslice(self, event): self.release_canvas(event)
+    def release_gzoom(self, event): self.release_canvas(event)
     def release_bvalue(self, event): self.release_canvas(event)
     def release_axis(self, event): self.release_canvas(event)
-    def release_sources(self, event): self.release_canvas(event)
     def release_view(self, event): self.release_canvas(event)
     def release_source(self, event): self.release_canvas(event)
 
     def get_method(self, a, f):
         if hasattr(a,f): return getattr(a, f)
         else:
-            a2 = self.Winst.get_adapter(a)
+            a2 = a.adapter
             if hasattr(a2,f): return getattr(a2, f)
             else: return None
 
@@ -621,7 +632,7 @@ class NavigationToolbar2(object):
         lims = []
         pos = []
         for a in self.canvas.figure.get_axes():
-            a2 = self.Winst.get_adapter(a)
+            a2 = a.adapter
             vws.append(a2.view_to_tuple())
             xmin, xmax = a.get_xlim()
             ymin, ymax = a.get_ylim()
@@ -652,7 +663,7 @@ class NavigationToolbar2(object):
         if pos is None:
             return
         for i, a in enumerate(self.canvas.figure.get_axes()):
-            a2 = self.Winst.get_adapter(a)
+            a2 = a.adapter
             a2.view_from_tuple(wvs[i])
             xmin, xmax, ymin, ymax = lims[i]
             a.set_xlim((xmin, xmax))
@@ -663,9 +674,6 @@ class NavigationToolbar2(object):
 
         self.canvas.draw_idle()
 
-
-    def debug(self, *args):
-        self.Winst.print_debug()
 
     #TODO: in this case can just replace calls here with self.canvas.draw_idle()
     def draw(self):
@@ -695,12 +703,13 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
       canvas   - the FigureCanvas  (gtk.DrawingArea)
       win   - the gtk.Window
     """
-    def __init__(self, canvas, window, Winst):
+    def __init__(self, canvas, window, gui):
         self.canvas = canvas
         self.window = window
         self._idle = True
+        self.gui = gui
         #Tk.Frame.__init__(self, master=self.canvas._tkcanvas)
-        NavigationToolbar2.__init__(self, canvas, Winst)
+        NavigationToolbar2.__init__(self, canvas, gui)
 
     def destroy(self, *args):
         del self.message
@@ -854,7 +863,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         y = event.guiEvent.y_root
 
         a = self._last_axis
-        a2 = self.Winst.get_adapter(a)
+        a2 = a.adapter
 
         for i in range(3):
             axes_string = WM.MINOR_AXES[i][0]+WM.MINOR_AXES[i][1]
@@ -867,24 +876,6 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
 
         pmenu.tk_popup(int(x),int(y),0)
 
-    def sources_menu(self, event):
-        """Show a popup menu to choose the WM sources"""
-        select_sources_menu = Tk.Menu(self)
-
-        x = event.guiEvent.x_root
-        y = event.guiEvent.y_root
-
-        source_menu = []
-        for i in range(len(self.Winst.sources)):
-            source_menu.append(Tk.Menu(self, tearoff=0))
-            select_sources_menu.add_cascade(label=str(i), menu=source_menu[-1])
-            for j in range(len(self.Winst.all_sources)):
-                def f (i=i,j=j):
-                    self.Winst.change_source(i,j)
-                    self.canvas.draw_idle()
-                source_menu[-1].add_radiobutton(label=str(j)+" ("+str(self.Winst.all_sources[j])+")", command=f )
-
-        select_sources_menu.tk_popup(int(x),int(y),0)
 
     def view_menu(self, event):
         """Show a popup menu to choose the WM view"""
@@ -894,12 +885,12 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         y = event.guiEvent.y_root
 
         a = self._last_axis
-        a2 = self.Winst.get_adapter(a)
+        a2 = a.adapter
 
-        wm_views = WM.TEMPLATES.keys()
+        wm_views = WM.ACTION_TEMPLATES
         for i,wm_view in enumerate(wm_views):
             def f (wm_view=wm_view,a=a):
-                self.Winst.change_template(wm_view, a)
+                self.gui.try_transition(wm_view, action_adapter=a2)
                 self.canvas.draw()
             smenu.add_command(label=wm_view, compound=Tk.LEFT, command=f)
 
@@ -913,14 +904,13 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         y = event.guiEvent.y_root
 
         a = self._last_axis
-        a2 = self.Winst.get_adapter(a)
+        a2 = a.adapter
 
-        sources = self.Winst.get_sources()
-        for i,source in enumerate(sources):
-            def f (i=i):
-                a2.change_source(i)
-                self.canvas.draw()
-            smenu.add_command(label=str(i)+" ("+str(source)+")", compound=Tk.LEFT, command=f)
+        for i, slot in enumerate(self.gui.viewer.wm.slots):
+            def f(slot=slot):
+                a2.change_slot(slot)
+                self.canvas.draw_idle()
+            smenu.add_command(label=str(i)+" ("+str(slot.image)+")", compound=Tk.LEFT, command=f)
 
         smenu.tk_popup(int(x),int(y),0)
 

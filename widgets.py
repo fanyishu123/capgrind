@@ -1,34 +1,22 @@
-
-
-
-#!/usr/bin/env python
-
+import os
 import matplotlib
 matplotlib.use('TkAgg')
-
-from numpy import arange, sin, pi
-from custom_toolbar import FigureCanvasTkAgg, NavigationToolbar2TkAgg
-# implement the default mpl key bindings
-from matplotlib.backend_bases import key_press_handler
-import WM
-from WM import Image_source
-
 from matplotlib.figure import Figure
+from custom_toolbar import FigureCanvasTkAgg, NavigationToolbar2TkAgg
 import Tkinter as Tk
-import tkMessageBox, tkFileDialog
 import ttk
-import os
+import tkMessageBox, tkFileDialog
 
-
+import WM
+from WM import UndefinedException, transition
+import DB
 
 class DataRange(object):
 
-    def __init__(self, gui, wm, viewer, ims):
+    def __init__(self, gui, ids):
         self.gui = gui
-        self.wm = wm
-        self.viewer = viewer
-        self.ims = ims
-        self.fns = [str(im) for im in self.ims]
+        self.ids = ids
+        self.cur_im = None
 
         t2 = Tk.Toplevel(self.gui.root)
         t2.title('Data Range Editor')
@@ -38,9 +26,15 @@ class DataRange(object):
         sel_fr = Tk.Frame(master=t2)
         Tk.Label(sel_fr, text="Image:").pack(side=Tk.LEFT)
         self.imagesel = ttk.Combobox(sel_fr)
-        self.imagesel['values'] = self.fns
-        self.imagesel.bind('<<ComboboxSelected>>', self.update)
-        self.imagesel.set(self.fns[0])
+        self.imagesel['values'] = self.ids
+        self.imagesel.bind('<<ComboboxSelected>>', self.changed)
+
+        id = self.ids[0]
+        im = self.get_image(id)
+        self.imagesel.set(id)
+        self.gui.event_handler.register_view(im, 'modified', self.update)
+        self.cur_im = im
+
         self.imagesel.pack(side=Tk.LEFT)
         sel_fr.pack(side=Tk.TOP)
 
@@ -86,8 +80,16 @@ class DataRange(object):
         self.update()
 
         def close():
+            self.gui.event_handler.unregister_view(self.cur_im, 'modified', self.update)
             t2.destroy()
         t2.protocol('WM_DELETE_WINDOW', close)
+
+    def changed(self, event):
+        im = self.get_image(self.imagesel.get())
+        self.gui.event_handler.unregister_view(self.cur_im, 'modified', self.update)
+        self.gui.event_handler.register_view(im, 'modified', self.update)
+        self.cur_im = im
+        self.update()
 
     def set_limits(self):
         try:
@@ -98,24 +100,22 @@ class DataRange(object):
             self.ulim.set(vma)
             # Set image kwargs to match this
             if not self.all_images.get():
-                im = self.source_by_name(self.imagesel.get())
-                im.kwargs['vmin'] = vmi
-                im.kwargs['vmax'] = vma
+                im = self.get_image(self.imagesel.get())
+                im.set_kwarg(vmin = vmi, vmax = vma)
             else:
-                for im in self.ims:
-                    im.kwargs['vmin'] = vmi
-                    im.kwargs['vmax'] = vma
+                for im in self.get_images():
+                    im.set_kwarg(vmin = vmi, vmax = vma)
             print "Set values:", vmi, vma
-            self.update()
         except ValueError:
             print "Error converting"
 
     def update(self, event=None):
         print "updating..."
-        im = self.source_by_name(self.imagesel.get())
+        print self.imagesel.get()
+        im = self.get_image(self.imagesel.get())
         # Read defined values into user fields
-        x1 = im.kwargs['vmin']
-        x2 = im.kwargs['vmax']
+        x1 = im.get_kwarg('vmin')
+        x2 = im.get_kwarg('vmax')
         self.llim.set(x1)
         self.ulim.set(x2)
         # Calculated when instanciated
@@ -125,85 +125,64 @@ class DataRange(object):
         self.a.hist(im.image.flat, bins=256, range=(x1,x2), fc='k', ec='k')
         self.a.set_xlim(x1,x2)
         self.canvas.draw()
-        self.reset_ims()
 
     def reset(self):
         print "resetting..."
         if not self.all_images.get():
-            im = self.source_by_name(self.imagesel.get())
-            im.kwargs['vmin'] = im.vmin
-            im.kwargs['vmax'] = im.vmax
+            im = self.get_image(self.imagesel.get())
+            im.set_kwarg(vmin = im.vmin, vmax = im.vmax)
             self.llim.set(im.vmin)
             self.ulim.set(im.vmax)
         else:
-            for im in self.ims:
-                im.kwargs['vmin'] = im.vmin
-                im.kwargs['vmax'] = im.vmax
-        self.update()
+            for im in self.get_images():
+                im.set_kwarg(vmin = im.vmin, vmax = im.vmax)
 
-    def source_by_name(self, name):
-        return self.ims[self.fns.index(name)]
+    def get_image(self, id):
+        return self.gui.image_db.get_image(id)
 
-    def reset_ims(self):
-        for s in self.ims:
-            if s in self.wm.get_sources():
-                for adapter in self.wm.get_adapters(s):
-                    adapter.reset()
-        self.viewer.redraw()
+    def get_images(self):
+        return [self.gui.image_db.get_image(id) for id in self.ids]
+
 
 class ImageContextMenu(Tk.Menu):
 
-    def __init__(self, gui, wm, viewer, imlist):
+    def __init__(self, gui, selected_ids):
         Tk.Menu.__init__(self, master=gui.root,tearoff=0)
 
         self.gui = gui
-        self.wm = wm
-        self.viewer = viewer
-        self.open_sources = imlist.get_selected()
+        self.selected_ids = selected_ids
+        self.selected_ims = [self.gui.image_db.get_image(i) for i in selected_ids]
 
         self.add_command(label="Open", command=self.open_in_viewer)
 
         self.add_command(label="Data Editor", command=self.open_data_editor)
         #self.add_command(label="ROI editor", command=self.none)
 
-        cmap_menu = Tk.Menu(self, tearoff=0)
-        self.add_cascade(label="Interpolation", menu=cmap_menu)
-        #TODO: this can iterate over keys in kws
-        for cn,cm in WM.Image_source.kws['interpolation'].items():
-            def f (cm=cm):
-                self.set_kwarg('interpolation',cm)
-            cmap_menu.add_command(label=cn, command=f)
-
-        intr_menu = Tk.Menu(self, tearoff=0)
-        self.add_cascade(label="Colormap", menu=intr_menu)
-        for cn,cm in WM.Image_source.kws['cmap'].items():
-            def f (cm=cm):
-                self.set_kwarg('cmap',cm)
-            intr_menu.add_command(label=cn, command=f)
+        for (kwarg_key, kwarg_vals), (kwarg_key_label, kwarg_vals_label) in zip(DB.Image_source.kws,
+                                                                                DB.Image_source.kwls):
+            menu = Tk.Menu(self, tearoff=0)
+            self.add_cascade(label=kwarg_key_label, menu=menu)
+            for kwarg_val, kwarg_val_label in zip(kwarg_vals, kwarg_vals_label):
+                menu.add_command(label=kwarg_val_label, command =\
+                lambda kwarg_key=kwarg_key,kwarg_val=kwarg_val : self._set_options(kwarg_key,kwarg_val))
 
     def open_in_viewer(self):
-        if self.open_sources != []:
-            self.gui.try_change('FULLSCREEN', len(self.open_sources), self.open_sources)
+        if self.selected_ims != []:
+            self.gui.try_transition('FULLSCREEN', old_slots=self.selected_ims,
+                                    n_to=len(self.selected_ims))
 
     def open_data_editor(self):
-        app = DataRange(self.gui, self.wm, self.viewer, self.open_sources)
+        app = DataRange(self.gui, self.selected_ids)
 
-    def set_kwarg(self,cn,cm):
-        for s in self.open_sources:
-            s.kwargs[cn]=cm
-            if s in self.wm.get_sources():
-                for adapter in self.wm.get_adapters(s):
-                    adapter.reset()
-        self.viewer.redraw()
+    def _set_options(self,cn,cm):
+        [s.set_option(cn, cm) for s in self.selected_ims]
 
 
 class ImageList(Tk.Frame):
 
-    def __init__(self, gui, wm, viewer):
+    def __init__(self, gui):
         Tk.Frame.__init__(self, master=gui.root)
         self.gui = gui
-        self.wm = wm
-        self.viewer = viewer
         self.create_images_list_toolbar()
         self.create_images_list()
 
@@ -217,8 +196,9 @@ class ImageList(Tk.Frame):
         scrollbar.pack(side=Tk.RIGHT, fill=Tk.BOTH)
         self.listbox.config(yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.listbox.yview)
-        self.update_listbox()
         list_frame.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+        self.modified()
+
 
     def create_images_list_toolbar(self):
         topframe = Tk.Frame(self)
@@ -242,8 +222,7 @@ class ImageList(Tk.Frame):
 
     def show_context_menu(self,event):
         if self.get_selected() != []:
-            ImageContextMenu(self.gui, self.wm, self.viewer, self).tk_popup(event.x_root+45,
-                                                                  event.y_root+10, 0)
+            ImageContextMenu(self.gui, self.get_selected_ids()).tk_popup(event.x_root+45, event.y_root+10, 0)
 
     def add_dir(self):
         path = tkFileDialog.askdirectory()
@@ -254,88 +233,169 @@ class ImageList(Tk.Frame):
                     if tfile.endswith(".npy"):
                         tfileList.append(dirpath+"/"+tfile)
             for fn in tfileList:
-                #self.listbox.insert(END, os.path.basename(fn))
-                self.gui.all_sources.append(Image_source(fn))
-            self.update_listbox()
+                im = DB.Image_source(fn)
+                self.gui.image_db.add_image(str(im),im)
+            #self.update_listbox()
 
 
     def add_source(self):
         filename = tkFileDialog.askopenfilename(filetypes=[('All supported', '.npy')])
         if filename:
-            #self.listbox.insert(END, os.path.basename(filename))
-            self.gui.all_sources.append(Image_source(filename))
-        self.update_listbox()
+            im = DB.Image_source(filename)
+            self.gui.image_db.add_image(str(im),im)
 
+    def get_selected_ids(self):
+        return [self.listbox.get(i) for i in self.listbox.curselection()]
 
     def get_selected(self):
-        selected = self.listbox.curselection()
-        return [self.gui.all_sources[i] for i in selected]
+        return [self.gui.image_db.get_image(id) for id in self.get_selected_ids()]
 
     def del_selected(self):
-        to_delete = self.listbox.curselection()[::-1]
-        for i in to_delete:
-            #self.listbox.delete(i)
-            del self.gui.all_sources[i]
-        self.update_listbox()
+        selected = [self.listbox.get(i) for i in self.listbox.curselection()]
+        self.gui.image_db.del_images(*selected)
 
-    def update_listbox(self):
+    def modified(self):
         self.listbox.delete(0,Tk.END)
-        for source in self.gui.all_sources:
-            self.listbox.insert(Tk.END, source)
+        [self.listbox.insert(Tk.END, id) for id in self.gui.image_db.identifiers()]
+
 
 class Viewer(Tk.Frame):
 
-    def __init__(self, gui, wm):
+    #TODO: transition could be prettier
+    def __init__(self, gui, to_template, old_slots=None, action_adapter=None, n_to=None):
         Tk.Frame.__init__(self, master=gui.root)
+        self.gui = gui
+        wm = self.transition(to_template, old_slots=old_slots, action_adapter=action_adapter, n_to=n_to)
+        print "Initializing viewer with wm",wm,"..."
+        print wm
+        print wm.slots
+        for slot in wm.slots:
+            print "slot", slot, "image", slot.image
+            print "\tadapters", slot.adapters, "axes", [adapter.axes for adapter in slot.adapters]
         self.wm = wm
-
         # Image (tk.DrawingArea)
-        fig = self.wm.get_figure()
+        fig = self.wm.fig
         self.canvas = FigureCanvasTkAgg(fig, master=self)
         self.canvas.get_tk_widget().pack(side=Tk.TOP,fill=Tk.BOTH,expand=Tk.YES)
         self.canvas.show()
         self.canvas.draw()
-
         # Matplotlib toolbar
-        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self, self.wm)
+        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self, gui)
         self.toolbar.update()
-        #self.toolbar.config(height=10)
-        #self.toolbar.pack(side=Tk.BOTTOM,fill=Tk.X,expand=Tk.NO)
+        self.bind_viewer()
+
+    def reload(self, to_template, old_slots=None, action_adapter=None, n_to=None):
+        self.unbind_viewer()
+        self.viewer = Viewer.__init__(self, self.gui, to_template, old_slots=old_slots,
+                                      action_adapter=action_adapter, n_to=n_to)
+        self.bind_viewer()
+        self.gui.wm_menu.refresh()
+        self.gui.wm_tree.refresh()
+        self.gui.repack()
+        self.redraw()
+
+    def transition(self, to_template, old_slots=None, action_adapter=None, n_to=None):
+        # same as dynamic kwarg: old_slots=self.viewer.wm.get_images()
+        old_slots = self.wm.get_images() if not old_slots else old_slots
+        try:
+            return transition(self.gui, to_template, old_slots, action_adapter,n_to)
+        except UndefinedException:
+            tkMessageBox.showerror("Transition undefined", "Transition to " + to_template +\
+                                   " is undefined from this state.")
+
+    def bind_viewer(self):
+        # WM
+        def wm_modified():
+            self.gui.wm_tree.refresh()
+            self.gui.wm_menu.refresh()
+        self.gui.event_handler.register_view(self.wm, 'modified', wm_modified)
+        # Images
+        for im in self.gui.image_db.get_images():
+            def im_modified(im=im):
+                self.wm.reset_all_adapters(im)
+                self.redraw()
+            self.gui.event_handler.register_view(im, 'modified', im_modified )
+
+    def unbind_viewer(self):
+        self.gui.event_handler.unregister_views(self.wm)
+        [self.gui.event_handler.unregister_views(im) for im in self.gui.image_db.get_images()]
 
     def redraw(self):
         self.canvas.draw_idle()
 
+
+class WM_Tree(Tk.Frame):
+
+    def __init__(self, gui):
+        self.gui = gui
+        Tk.Frame.__init__(self, master=gui.root)
+        self.tree = ttk.Treeview(self, columns=('info'))
+        self.tree.column('info', width=250)
+        self.tree.column('#0', width=125)
+
+        self.id_root = self.tree.insert('','end',text='WM', values=(str(self.gui.viewer.wm),), open=True)
+        self.add_nodes()
+
+        self.tree.pack(side=Tk.RIGHT, fill=Tk.BOTH, expand=Tk.YES)
+
+    def add_nodes(self):
+        for i,slot in enumerate(self.gui.viewer.wm.slots):
+            id1 = self.tree.insert(self.id_root,'end',text='Slot '+str(i), values=(str(slot),), open=True)
+            self.tree.insert(id1,'end',text='Image', values=(str(slot.image),), open=True)
+            point = None if not slot.point else "%.2f, %.2f, %.2f"%tuple(slot.point)
+            self.tree.insert(id1,'end',text='Point', values=(point,), open=True)
+            id2 = self.tree.insert(id1,'end',text='Views', open=True)
+            for j,adapter in enumerate(slot.adapters):
+                self.tree.insert(id2, 'end', 'view'+str(i)+str(j), text='View '+str(j),
+                                       values=(str(adapter),), tags='view', open=True)
+                #self.tree.insert(id3, 'end', text='Axes', values=(str(adapter.axes,)))
+            self.tree.insert(id1,'end',text='ROIs', open=True)
+
+    # TODO: this needs an intelligent update function. Instead of regenerating the tree, we need to commit
+    # TODO: the corresponding changes. Figure out the best way to keep the WM tree and the id tree in sync.
+    def refresh(self):
+        self.tree.delete(self.id_root)
+        self.id_root = self.tree.insert('','end',text='WM', values=(str(self.gui.viewer.wm),), open=True)
+        self.add_nodes()
+
+
 class WM_Menu(Tk.Menu):
 
-    def __init__(self,gui,wm,viewer):
+    def __init__(self,gui):
         Tk.Menu.__init__(self, master=gui.menubar,tearoff=0)
         self.gui = gui
-        self.wm = wm
-        self.viewer = viewer
 
         # Select sources
         self.add_source_buttons()
 
+    #TODO: This should have seperate routines for initialization and modification,
+    #TODO: i.e register functions to change in each slot/adapter that reset the str() here
     def add_source_buttons(self):
         self.source_selection = []
-        for i in range(len(self.wm.sources)):
+        for i, slot in enumerate(self.gui.viewer.wm.slots):
             source_menu = Tk.Menu(master=self, tearoff=0)
-            self.add_cascade(label="Source "+str(i), menu=source_menu)
+            self.add_cascade(label="Slot "+str(i), menu=source_menu)
 
             v = Tk.StringVar()
             self.source_selection.append(v)
-            for j in range(len(self.gui.all_sources)):
-                def f (i=i,j=j):
-                    self.wm.change_source(i,j)
-                    self.viewer.redraw()
-
-                source_string = str(j)+" ("+str(self.gui.all_sources[j])+")"
-                if self.gui.all_sources[j] == self.wm.sources[i]: v.set(source_string)
+            for id in self.gui.image_db.identifiers():
+                def f (slot=slot,id=id):
+                    slot.set_image(id)
+                    self.gui.viewer.redraw()
+                source_string = str(id)+" ("+str(self.gui.image_db.get_image(id))+")"
+                if self.gui.image_db.get_image(id) == slot.image: v.set(source_string)
                 source_menu.add_radiobutton(label=source_string, variable=v, command=f )
+        self.add_separator()
+        self.add_command(label="Add Slot", command=self.gui.viewer.wm.add_slot)
+        self.add_command(label="Remove Unused Slots", command=self.gui.viewer.wm.remove_unused_slots)
 
     def refresh(self):
         self.delete(0, 'end')
         self.add_source_buttons()
+
+    def modified(self):
+        self.refresh()
+
 
 class TemplateMenu(Tk.Menu):
 
@@ -346,14 +406,10 @@ class TemplateMenu(Tk.Menu):
         self.add_template_buttons()
 
     def add_template_buttons(self):
-        self.add_command(label="Full Screen",
-                         command=lambda: self.gui.try_change('FULLSCREEN',1))
-        self.add_command(label="Projection",
-                         command=lambda: self.gui.try_change('PROJECTION',1))
-        self.add_command(label="Slices",
-                         command=lambda: self.gui.try_change('SLICES',1))
+        for template_name in WM.TEMPLATES.keys():
+            self.add_command(label=template_name, command =\
+                lambda template_name=template_name: self.gui.try_transition(template_name))
         self.add_command(label="Compare Full Screen",
-                         command=lambda: self.gui.try_change('FULLSCREEN',2))
+                         command=lambda: self.gui.try_transition('FULLSCREEN',n_to=2))
         self.add_command(label="Compare Projection",
-                         command=lambda: self.gui.try_change('PROJECTION',2))
-
+                         command=lambda: self.gui.try_transition('PROJECTION',n_to=2))

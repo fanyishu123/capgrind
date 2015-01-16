@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<Model>
+	<Spaces/>
+	<FigureAdapter space_inds="[None]" template_name="'1x1'">
+		<AxesAdapter a1="1" a2="2" proj="[0, 0, 0, 0]" xmax="100.0" xmin="0.0" ymax="100.0" ymin="0.0"/>
+	</FigureAdapter>
+</Model>

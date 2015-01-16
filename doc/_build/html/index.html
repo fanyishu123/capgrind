@@ -1,0 +1,307 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>SuperKluge documentation &mdash; SuperKluge 5 documentation</title>
+    
+    <link rel="stylesheet" href="_static/default.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <link rel="top" title="SuperKluge 5 documentation" href="#" /> 
+  </head>
+  <body>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li><a href="#">SuperKluge 5 documentation</a> &raquo;</li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body">
+            
+  <div class="section" id="superkluge-documentation">
+<h1>SuperKluge documentation<a class="headerlink" href="#superkluge-documentation" title="Permalink to this headline">¶</a></h1>
+<div class="contents local topic" id="contents">
+<ul class="simple">
+<li><a class="reference internal" href="#problems" id="id1">Problems</a></li>
+<li><a class="reference internal" href="#introduction" id="id2">Introduction</a></li>
+<li><a class="reference internal" href="#conceptual-model" id="id3">Conceptual model</a></li>
+<li><a class="reference internal" href="#programming-model" id="id4">Programming model</a></li>
+<li><a class="reference internal" href="#gui-tools" id="id5">GUI Tools</a></li>
+<li><a class="reference internal" href="#todo" id="id6">TODO</a></li>
+</ul>
+</div>
+<div class="section" id="problems">
+<h2><a class="toc-backref" href="#id1">Problems</a><a class="headerlink" href="#problems" title="Permalink to this headline">¶</a></h2>
+<p>Right now the program has all the functionality, but the edges are so
+rough that it is not yet usable for the user. Example problems:</p>
+<ul class="simple">
+<li>The viewer only accepts dicom arrays</li>
+<li>The viewer is quite slow with many arrays or a large template.</li>
+<li>Some GUI functions are extremely unintuitive: ex. the tree widget behavior.</li>
+<li>It assumes no errors: trying to load non-existing file or acting on an unbinded view will crash.</li>
+</ul>
+<p>All of these problems will be rectified. In the meantime, you can use
+this to convert a dicom into a numpy array:</p>
+<div class="highlight-python"><div class="highlight"><pre><span class="kn">import</span> <span class="nn">numpy</span>
+<span class="kn">import</span> <span class="nn">dwi.dwimage</span>
+
+<span class="n">dwimage</span> <span class="o">=</span> <span class="n">dwi</span><span class="o">.</span><span class="n">dwimage</span><span class="o">.</span><span class="n">load_dicom</span><span class="p">(</span><span class="s">&#39;path_to_file&#39;</span><span class="p">)</span>
+<span class="n">numpy</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="s">&#39;dicomfile1.npy&#39;</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">dwimage</span><span class="o">.</span><span class="n">image</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>These tasks are quite simple, they shouldn&#8217;t take long to implement.</p>
+</div>
+<div class="section" id="introduction">
+<h2><a class="toc-backref" href="#id2">Introduction</a><a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>The SuperKluge is a multidimensional array viewer. It can be used to
+visualize multidimensional images, such as those used in medical imaging
+. An example image of this type is a DICOM file which consists of voxels
+and b-values. These define a 4D array with indices Z, Y, X, B
+containing floating point values. The SuperKluge can visualize this by
+<em>taking slices</em>, i.e. displaying different 2D projections of the array.</p>
+<p>SuperKluge is a work in progress research prototype. The goal
+is to use matplotlib and numpy to create a version of the matplotlib&#8217;s
+default viewer for multidimensional images. The displayed data is an
+arbitrary numpy array, or a superimposed collection of arrays. This
+means that the platform can be extended to perform many kinds of
+operations and machine learning tasks external to the viewer.</p>
+<p>The viewer should strive for codebase simplicity and extensibility.
+It should be possible to add tools and functions without changing the
+underlying architecture. Minimal assumptions such as in matplotlib&#8217;s
+viewer imply greater extensibility.</p>
+</div>
+<div class="section" id="conceptual-model">
+<h2><a class="toc-backref" href="#id3">Conceptual model</a><a class="headerlink" href="#conceptual-model" title="Permalink to this headline">¶</a></h2>
+<a class="reference internal image-reference" href="_images/regular_grid.svg"><img src="_images/regular_grid.svg" width="250pt" /></a>
+<p>The program consists of a collection of discretized R^D hyperspaces
+with values assigned to each point. We assume that the discretization
+process uses homogenous distances, so that the space is a
+multidimensional grid. The grid block may be a hyperractangle, not
+necessarily a hypercube, but the block sizes must be consistent.</p>
+<p><strong>TODO: Image of a space with arrays in it</strong></p>
+<p>Each hyperspace can contain one or more arrays, which define the value
+at each grid point. If two arrays occupy the same grid, the array order
+defines which is superimposed. The hyperspace can also contain abstract
+mathematical primitives such as hyperrectangles or hyperellipses, which
+are used to choose a set of grid items that belong to the space inside
+their boundary.</p>
+<p><strong>TODO: Image of a sliced 3D cube</strong></p>
+<p>A simple example is a 3D cube grid with each pixel colored according to
+the value. The program can take slices of this object to three direcions
+: X, Y or Z. We must specify which slice to take in the given direction,
+and we then get a colored 2D array.</p>
+<p>These 2D projections are called <em>views</em> in the program. In a D-
+dimensional space we must specify D-2 values for which slice to take,
+and then the limits for the view in the achieved 2D space. Each view has
+the following attributes:</p>
+<ul class="simple">
+<li>Axes <em>x_i, x_j</em> view limits <em>xmin, xmax, ymin, ymax</em> in the 2D projection.</li>
+<li>D-2 dimensional projection specification <em>(x_1, ..., x_(D-2))</em> for which <em>slice</em> to take.</li>
+<li>A point <em>x, y</em> in the 2D projection, when combined with above translates into D-dimensional point specification.</li>
+</ul>
+<p>Internally these are merged into the axes indices <em>a1,a2</em>, a bounding
+box for the 2D projection <em>(xmin,xmax,ymin,ymax)</em> and a D-dimensional
+point specification <em>proj</em>.</p>
+<p><strong>TODO: Image of the program as a viewer into these spaces</strong></p>
+</div>
+<div class="section" id="programming-model">
+<h2><a class="toc-backref" href="#id4">Programming model</a><a class="headerlink" href="#programming-model" title="Permalink to this headline">¶</a></h2>
+<p>The program has two essential models:</p>
+<ol class="arabic simple">
+<li>A plotting specification</li>
+<li>A space  specification</li>
+</ol>
+<p>Rest of the program is just one large view into these spefications.</p>
+<p>The space  specification is the model which contains the space
+properties and all the data of arrays placed into the space. Data is
+requested from this space for plotting.</p>
+<p>The plotting specification determines a set of 2D projections to fetch:
+what space they refer to, what projection to take and what view limits
+to set. It also contains the template of what window arrangment to use
+in the viewer.</p>
+<p>All actions in the program change either the space or the plotting
+specification. Actions such as loading or removing an image change the
+space. Some attributes such as minimum / maximum value to use or the
+colormap are also defined as properties in the space or the array in
+the space because any change in these should be interpreted as a change
+in data.</p>
+<p>The toolbar buttons contain actions that manipulate the plotting
+specification: sliding through b-values or slices change the underlying
+projection specification of the view under action. Similarly, choosing
+a point in space does not change the data, but updates all views
+referring to that space to refer to that point. Some actions are local
+and some are global: a zoom can either zoom all views in a space or only
+the view under action.</p>
+<p>Here is a high level conceptual overview into the program:</p>
+<p><strong>TODO</strong></p>
+<p>Here is a detailed class hierarchy of the program:</p>
+<p><strong>TODO</strong></p>
+</div>
+<div class="section" id="gui-tools">
+<h2><a class="toc-backref" href="#id5">GUI Tools</a><a class="headerlink" href="#gui-tools" title="Permalink to this headline">¶</a></h2>
+<p>The program has user oriented tools for view manipulation. The tools are placed in the
+toolbar, and most of them have 3 modes. A left click&amp;drag changes the
+values continously, a mouse scroll up/down changes them discretely, and
+right click brings up a menu. Many tools have the possibility to limit
+the action to the view clicked (local), or sync the action to all views
+referring to the same space as the view (global).</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="14%" />
+<col width="21%" />
+<col width="21%" />
+<col width="44%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Name</th>
+<th class="head">Drag</th>
+<th class="head">Scroll</th>
+<th class="head">Right-click</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>Crosshair</td>
+<td>Sync views to a point</td>
+<td>Change slice up/down</td>
+<td>Change viewer template to display region around a point</td>
+</tr>
+<tr class="row-odd"><td>BValues</td>
+<td>Go through bvalues</td>
+<td>Change bvalue up/down</td>
+<td>Change mode: global/local</td>
+</tr>
+<tr class="row-even"><td>Zoom</td>
+<td>Go through zoom levels</td>
+<td>Change zoom level up/down</td>
+<td>Change mode: global/local</td>
+</tr>
+<tr class="row-odd"><td>Move</td>
+<td>Pan the view</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr class="row-even"><td>Projection</td>
+<td>Cycle projection axes</td>
+<td>N/A</td>
+<td>Select X/Y/Z</td>
+</tr>
+<tr class="row-odd"><td>Space</td>
+<td>N/A</td>
+<td>N/A</td>
+<td>Select referred space</td>
+</tr>
+<tr class="row-even"><td>Template</td>
+<td>N/A</td>
+<td>N/A</td>
+<td>Select viewer template</td>
+</tr>
+<tr class="row-odd"><td>HyperRectangle</td>
+<td>Select ROI in axes</td>
+<td>Select ROI in norm</td>
+<td>Select ROI under edit, matching base type</td>
+</tr>
+<tr class="row-even"><td>HyperEllipse</td>
+<td>Select ROI in axes</td>
+<td>Select ROI in norm</td>
+<td>Select ROI under edit, matching base type</td>
+</tr>
+</tbody>
+</table>
+<p><strong>TODO: Icons</strong></p>
+</div>
+<div class="section" id="todo">
+<h2><a class="toc-backref" href="#id6">TODO</a><a class="headerlink" href="#todo" title="Permalink to this headline">¶</a></h2>
+<p>Milk, butter, bread, eggs...</p>
+<div class="section" id="indices-and-tables">
+<h3>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><a class="reference internal" href="genindex.html"><em>Index</em></a></li>
+<li><a class="reference internal" href="py-modindex.html"><em>Module Index</em></a></li>
+<li><a class="reference internal" href="search.html"><em>Search Page</em></a></li>
+</ul>
+</div>
+</div>
+</div>
+
+
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar">
+        <div class="sphinxsidebarwrapper">
+  <h3><a href="#">Table Of Contents</a></h3>
+  <ul>
+<li><a class="reference internal" href="#">SuperKluge documentation</a><ul>
+<li><a class="reference internal" href="#problems">Problems</a></li>
+<li><a class="reference internal" href="#introduction">Introduction</a></li>
+<li><a class="reference internal" href="#conceptual-model">Conceptual model</a></li>
+<li><a class="reference internal" href="#programming-model">Programming model</a></li>
+<li><a class="reference internal" href="#gui-tools">GUI Tools</a></li>
+<li><a class="reference internal" href="#todo">TODO</a><ul>
+<li><a class="reference internal" href="#indices-and-tables">Indices and tables</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+  <h3>This Page</h3>
+  <ul class="this-page-menu">
+    <li><a href="_sources/index.txt"
+           rel="nofollow">Show Source</a></li>
+  </ul>
+<div id="searchbox" style="display: none">
+  <h3>Quick search</h3>
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    <p class="searchtip" style="font-size: 90%">
+    Enter search terms or a module, class or function name.
+    </p>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="genindex.html" title="General Index"
+             >index</a></li>
+        <li><a href="#">SuperKluge 5 documentation</a> &raquo;</li> 
+      </ul>
+    </div>
+    <div class="footer">
+        &copy; Copyright 2015, Markus Viljanen.
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a> 1.2.3.
+    </div>
+  </body>
+</html>

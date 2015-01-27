@@ -25,7 +25,6 @@ class NavigationToolbar2(object):
         Tools.Pan('Move', 'Move the axes', 'move', 'hand2'),
         Tools.ChangeAxes('Projection', 'Change projection into axes', 'move', 'll_angle'),
         Tools.ChangeSpace('Space', 'Change views space', 'move', 'icon'),
-        Tools.ChangeTemplate('Template', 'Change plotter template', 'move', 'leftbutton'),
         Tools.HyperRectangleSelector('Hyperrectangle', 'Select hyperrectangle ROI', 'move', 'cross'),
         Tools.HyperEllipseSelector('Hyperrellipse', 'Select hyperellipse ROI', 'move', 'cross'),
       )
@@ -79,7 +78,7 @@ class NavigationToolbar2(object):
         for i, a in enumerate(self.canvas.figure.get_axes()):
             if x is not None and y is not None and a.in_axes(event):
                 self._last_axis = a
-                a2 = a.adapter
+                a2 = self.get_adapter(a)
                 if event.button == 1:
                     self.canvas.draw_idle()
                     self.canvas.mpl_disconnect(self._idDrag)
@@ -91,7 +90,7 @@ class NavigationToolbar2(object):
     # CANVAS MOUSE DRAG
     # General function to call when a mouse drag occurs in canvas
     def drag_canvas(self, event):
-        a2 = self._last_axis.adapter
+        a2 = self.get_adapter(self._last_axis)
         self._active_tool.drag(a2, event)
         self.display_message(event)
         self.canvas.draw_idle()
@@ -102,7 +101,7 @@ class NavigationToolbar2(object):
         self.canvas.mpl_disconnect(self._idDrag)
         self._idDrag = self.canvas.mpl_connect('motion_notify_event', self.mouse_move)
         if not self._last_axis: return
-        a2 = self._last_axis.adapter
+        a2 = self.get_adapter(self._last_axis)
         self._active_tool.end(a2, event)
         self._last_axis = None
 
@@ -113,7 +112,7 @@ class NavigationToolbar2(object):
         for i, a in enumerate(self.canvas.figure.get_axes()):
             if x is not None and y is not None and a.in_axes(event):
                 self._last_axis = a
-                a2 = a.adapter
+                a2 = self.get_adapter(a)
                 if event.button == 'up':
                     self._active_tool.scroll_up(a2, event)
                 elif event.button == 'down':
@@ -135,7 +134,7 @@ class NavigationToolbar2(object):
 
     def display_message(self, event):
         if event.inaxes and event.inaxes.get_navigate() and self._active_tool:
-            a2 = event.inaxes.adapter
+            a2 = self.get_adapter(event.inaxes)
             if self._active_tool.name == 'Crosshair':
                 s = a2.get_display_str(point=True)
             else:
@@ -151,13 +150,17 @@ class NavigationToolbar2(object):
     def set_message(self, s): pass
     def set_cursor(self, cursor): pass
 
+    def get_adapter(self, a):
+        return self.gui.model.figure_adapter.adapters[self.canvas.figure.axes.index(a)]
+
 
 # Tkinter specific toolbar logic
 class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
 
-    def __init__(self, canvas, window):
+    def __init__(self, canvas, gui, root):
         self.canvas = canvas
-        self.window = window
+        self.gui = gui
+        self.root = root
         self._idle = True
         #TODO: maybe we should merge these, calling the second 'init'/_init_toolbar back here is confusing
         NavigationToolbar2.__init__(self, canvas)
@@ -170,7 +173,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
         self.message.set(s)
 
     def set_cursor(self, cursor):
-        self.window.configure(cursor=cursor)
+        self.root.configure(cursor=cursor)
 
     def _Button(self, text, file, command, extension='.ppm'):
         img_file = os.path.join(rcParams['datapath'], 'images', file + extension)
@@ -184,7 +187,7 @@ class NavigationToolbar2TkAgg(NavigationToolbar2, Tk.Frame):
     def _init_toolbar(self):
         xmin, xmax = self.canvas.figure.bbox.intervalx
         height, width = 50, xmax-xmin
-        Tk.Frame.__init__(self, master=self.window, width=int(width), height=int(height), borderwidth=2)
+        Tk.Frame.__init__(self, master=self.root, width=int(width), height=int(height), borderwidth=2)
 
         self.message = Tk.StringVar(master=self)
         self._message_label = Tk.Label(master=self, textvariable=self.message)

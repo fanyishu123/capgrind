@@ -16,10 +16,11 @@ Problems
 Right now the program has all the functionality, but the edges are so
 rough that it is not yet usable for the user. Example problems:
 
-* The viewer only accepts dicom arrays
-* The viewer is quite slow with many arrays or a large template. 
 * Some GUI functions are extremely unintuitive: ex. the tree widget behavior.
+* The viewer is quite slow with many arrays or a large template. 
 * It assumes no errors: trying to load non-existing file or acting on an unbinded view will crash.
+* There is no proper program wide definition for what the physical space actually is.
+* The architecture is still not as extendable as I'd like.
 
 All of these problems will be rectified. In the meantime, you can use
 this to convert a dicom into a numpy array::
@@ -62,12 +63,18 @@ Conceptual model
 
 
 The program consists of a collection of discretized R^D hyperspaces 
-with values assigned to each point. We assume that the discretization 
+with values assigned to each block. We assume that the discretization 
 process uses homogenous distances, so that the space is a
 multidimensional grid. The grid block may be a hyperractangle, not
 necessarily a hypercube, but the block sizes must be consistent.
 
-**TODO: Image of a space with arrays in it**
+.. note:: This interpretation has a subtle problem, it assumes nearest
+   neighbor interpolation.... In reality we should be manipulating points
+   in the real space, and only interpolate at the upmost level of plotting
+   this space.
+
+.. image:: space.png
+    :width: 250pt
 
 Each hyperspace can contain one or more arrays, which define the value
 at each grid point. If two arrays occupy the same grid, the array order
@@ -76,13 +83,17 @@ mathematical primitives such as hyperrectangles or hyperellipses, which
 are used to choose a set of grid items that belong to the space inside
 their boundary.
 
-**TODO: Image of a sliced 3D cube**
+.. image:: slices.png
+    :width: 750pt
 
 A simple example is a 3D cube grid with each pixel colored according to
 the value. The program can take slices of this object to three direcions
 : X, Y or Z. We must specify which slice to take in the given direction,
 and we then get a colored 2D array.
 
+.. image:: viewer.png
+    :width: 400pt
+    
 These 2D projections are called *views* in the program. In a D-
 dimensional space we must specify D-2 values for which slice to take, 
 and then the limits for the view in the achieved 2D space. Each view has
@@ -96,7 +107,6 @@ Internally these are merged into the axes indices *a1,a2*, a bounding
 box for the 2D projection *(xmin,xmax,ymin,ymax)* and a D-dimensional
 point specification *proj*.
 
-**TODO: Image of the program as a viewer into these spaces**
 
 Programming model
 =================
@@ -134,7 +144,8 @@ the view under action.
 
 Here is a high level conceptual overview into the program:
 
-**TODO**
+.. image:: overview.png
+    :width: 600pt
 
 Here is a detailed class hierarchy of the program:
 
@@ -143,7 +154,23 @@ Here is a detailed class hierarchy of the program:
 GUI Tools
 =========
 
-The program has user oriented tools for view manipulation. The tools are placed in the
+Menu tools
+----------
+
+Tools placed in the menu apply to the entire program.
+
+==================  ==========================
+Name                Action                    
+==================  ==========================
+File -> Save State  Save the current program state as an XML file
+File -> Load State  Load a new program state from an XML file
+Template            Select viewer static template from a menu                    
+==================  ==========================
+
+Toolbar tools
+-------------
+
+Tools applying to view manipulation are placed in the
 toolbar, and most of them have 3 modes. A left click&drag changes the
 values continously, a mouse scroll up/down changes them discretely, and
 right click brings up a menu. Many tools have the possibility to limit
@@ -159,17 +186,21 @@ Zoom                Go through zoom levels      Change zoom level up/down   Chan
 Move                Pan the view                N/A                         N/A
 Projection          Cycle projection axes       N/A                         Select X/Y/Z
 Space               N/A                         N/A                         Select referred space
-Template            N/A                         N/A                         Select viewer template
 HyperRectangle      Select ROI in axes          Select ROI in norm          Select ROI under edit, matching base type
 HyperEllipse        Select ROI in axes          Select ROI in norm          Select ROI under edit, matching base type
 ==================  ==========================  ==========================  ===========
 
 **TODO: Icons**
 
-TODO
-====
 
-Milk, butter, bread, eggs...
+Documentation for the Code
+**************************
+
+Model
+=====
+
+.. automodule:: Model
+   :members:
 
 Indices and tables
 ------------------

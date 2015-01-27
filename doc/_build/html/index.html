@@ -32,6 +32,9 @@
         <li class="right" style="margin-right: 10px">
           <a href="genindex.html" title="General Index"
              accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
         <li><a href="#">SuperKluge 5 documentation</a> &raquo;</li> 
       </ul>
     </div>  
@@ -50,7 +53,6 @@
 <li><a class="reference internal" href="#conceptual-model" id="id3">Conceptual model</a></li>
 <li><a class="reference internal" href="#programming-model" id="id4">Programming model</a></li>
 <li><a class="reference internal" href="#gui-tools" id="id5">GUI Tools</a></li>
-<li><a class="reference internal" href="#todo" id="id6">TODO</a></li>
 </ul>
 </div>
 <div class="section" id="problems">
@@ -58,10 +60,11 @@
 <p>Right now the program has all the functionality, but the edges are so
 rough that it is not yet usable for the user. Example problems:</p>
 <ul class="simple">
-<li>The viewer only accepts dicom arrays</li>
-<li>The viewer is quite slow with many arrays or a large template.</li>
 <li>Some GUI functions are extremely unintuitive: ex. the tree widget behavior.</li>
+<li>The viewer is quite slow with many arrays or a large template.</li>
 <li>It assumes no errors: trying to load non-existing file or acting on an unbinded view will crash.</li>
+<li>There is no proper program wide definition for what the physical space actually is.</li>
+<li>The architecture is still not as extendable as I&#8217;d like.</li>
 </ul>
 <p>All of these problems will be rectified. In the meantime, you can use
 this to convert a dicom into a numpy array:</p>
@@ -97,22 +100,30 @@ viewer imply greater extensibility.</p>
 <h2><a class="toc-backref" href="#id3">Conceptual model</a><a class="headerlink" href="#conceptual-model" title="Permalink to this headline">¶</a></h2>
 <a class="reference internal image-reference" href="_images/regular_grid.svg"><img src="_images/regular_grid.svg" width="250pt" /></a>
 <p>The program consists of a collection of discretized R^D hyperspaces
-with values assigned to each point. We assume that the discretization
+with values assigned to each block. We assume that the discretization
 process uses homogenous distances, so that the space is a
 multidimensional grid. The grid block may be a hyperractangle, not
 necessarily a hypercube, but the block sizes must be consistent.</p>
-<p><strong>TODO: Image of a space with arrays in it</strong></p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This interpretation has a subtle problem, it assumes nearest
+neighbor interpolation.... In reality we should be manipulating points
+in the real space, and only interpolate at the upmost level of plotting
+this space.</p>
+</div>
+<a class="reference internal image-reference" href="_images/space.png"><img alt="_images/space.png" src="_images/space.png" style="width: 250pt;" /></a>
 <p>Each hyperspace can contain one or more arrays, which define the value
 at each grid point. If two arrays occupy the same grid, the array order
 defines which is superimposed. The hyperspace can also contain abstract
 mathematical primitives such as hyperrectangles or hyperellipses, which
 are used to choose a set of grid items that belong to the space inside
 their boundary.</p>
-<p><strong>TODO: Image of a sliced 3D cube</strong></p>
+<a class="reference internal image-reference" href="_images/slices.png"><img alt="_images/slices.png" src="_images/slices.png" style="width: 750pt;" /></a>
 <p>A simple example is a 3D cube grid with each pixel colored according to
 the value. The program can take slices of this object to three direcions
 : X, Y or Z. We must specify which slice to take in the given direction,
 and we then get a colored 2D array.</p>
+<a class="reference internal image-reference" href="_images/viewer.png"><img alt="_images/viewer.png" src="_images/viewer.png" style="width: 400pt;" /></a>
 <p>These 2D projections are called <em>views</em> in the program. In a D-
 dimensional space we must specify D-2 values for which slice to take,
 and then the limits for the view in the achieved 2D space. Each view has
@@ -125,7 +136,6 @@ the following attributes:</p>
 <p>Internally these are merged into the axes indices <em>a1,a2</em>, a bounding
 box for the 2D projection <em>(xmin,xmax,ymin,ymax)</em> and a D-dimensional
 point specification <em>proj</em>.</p>
-<p><strong>TODO: Image of the program as a viewer into these spaces</strong></p>
 </div>
 <div class="section" id="programming-model">
 <h2><a class="toc-backref" href="#id4">Programming model</a><a class="headerlink" href="#programming-model" title="Permalink to this headline">¶</a></h2>
@@ -156,13 +166,41 @@ referring to that space to refer to that point. Some actions are local
 and some are global: a zoom can either zoom all views in a space or only
 the view under action.</p>
 <p>Here is a high level conceptual overview into the program:</p>
-<p><strong>TODO</strong></p>
+<a class="reference internal image-reference" href="_images/overview.png"><img alt="_images/overview.png" src="_images/overview.png" style="width: 600pt;" /></a>
 <p>Here is a detailed class hierarchy of the program:</p>
 <p><strong>TODO</strong></p>
 </div>
 <div class="section" id="gui-tools">
 <h2><a class="toc-backref" href="#id5">GUI Tools</a><a class="headerlink" href="#gui-tools" title="Permalink to this headline">¶</a></h2>
-<p>The program has user oriented tools for view manipulation. The tools are placed in the
+<div class="section" id="menu-tools">
+<h3>Menu tools<a class="headerlink" href="#menu-tools" title="Permalink to this headline">¶</a></h3>
+<p>Tools placed in the menu apply to the entire program.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="29%" />
+<col width="71%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Name</th>
+<th class="head">Action</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>File -&gt; Save State</td>
+<td>Save the current program state as an XML file</td>
+</tr>
+<tr class="row-odd"><td>File -&gt; Load State</td>
+<td>Load a new program state from an XML file</td>
+</tr>
+<tr class="row-even"><td>Template</td>
+<td>Select viewer static template from a menu</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="section" id="toolbar-tools">
+<h3>Toolbar tools<a class="headerlink" href="#toolbar-tools" title="Permalink to this headline">¶</a></h3>
+<p>Tools applying to view manipulation are placed in the
 toolbar, and most of them have 3 modes. A left click&amp;drag changes the
 values continously, a mouse scroll up/down changes them discretely, and
 right click brings up a menu. Many tools have the possibility to limit
@@ -213,17 +251,12 @@ referring to the same space as the view (global).</p>
 <td>N/A</td>
 <td>Select referred space</td>
 </tr>
-<tr class="row-even"><td>Template</td>
-<td>N/A</td>
-<td>N/A</td>
-<td>Select viewer template</td>
-</tr>
-<tr class="row-odd"><td>HyperRectangle</td>
+<tr class="row-even"><td>HyperRectangle</td>
 <td>Select ROI in axes</td>
 <td>Select ROI in norm</td>
 <td>Select ROI under edit, matching base type</td>
 </tr>
-<tr class="row-even"><td>HyperEllipse</td>
+<tr class="row-odd"><td>HyperEllipse</td>
 <td>Select ROI in axes</td>
 <td>Select ROI in norm</td>
 <td>Select ROI under edit, matching base type</td>
@@ -232,9 +265,83 @@ referring to the same space as the view (global).</p>
 </table>
 <p><strong>TODO: Icons</strong></p>
 </div>
-<div class="section" id="todo">
-<h2><a class="toc-backref" href="#id6">TODO</a><a class="headerlink" href="#todo" title="Permalink to this headline">¶</a></h2>
-<p>Milk, butter, bread, eggs...</p>
+</div>
+</div>
+<div class="section" id="documentation-for-the-code">
+<h1>Documentation for the Code<a class="headerlink" href="#documentation-for-the-code" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="module-Model">
+<span id="model"></span><h2>Model<a class="headerlink" href="#module-Model" title="Permalink to this headline">¶</a></h2>
+<span class="target" id="module-Model"></span><div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This could be a lot more generic and beautiful, needs schema support as well...</p>
+</div>
+<p>There are some subtle yet annoying issues with writing a fully generic python object &lt;-&gt; XML node conversion
+It is straigthforward to write a recursive function, based solely on attribute names, values, number children etc.
+but even then we need to make some assumptions about the data model because dealing with a fully generic tree model
+is very annoying and uninformative in code level. I have an lxml.objectify version that needs porting...</p>
+<p>The best idea seems to be to write an interface that all xml loadable / dumbable objects support (ala pickle)...</p>
+<dl class="class">
+<dt id="Model.Model">
+<em class="property">class </em><tt class="descclassname">Model.</tt><tt class="descname">Model</tt><big>(</big><em>gui</em><big>)</big><a class="headerlink" href="#Model.Model" title="Permalink to this definition">¶</a></dt>
+<dd><p>This object holds the entire program state as an object hierarchy.</p>
+<dl class="method">
+<dt id="Model.Model.load">
+<tt class="descname">load</tt><big>(</big><em>fn=None</em><big>)</big><a class="headerlink" href="#Model.Model.load" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load the state from a given file, or generate an empty state if none is provided.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>fn</strong> (<em>str.</em>) &#8211; Filename to load from</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="Model.Model.load_xml">
+<tt class="descname">load_xml</tt><big>(</big><em>fn</em><big>)</big><a class="headerlink" href="#Model.Model.load_xml" title="Permalink to this definition">¶</a></dt>
+<dd><p>Load the state from a given XML file.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>fn</strong> (<em>str.</em>) &#8211; Filename to load from</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="Model.Model.save">
+<tt class="descname">save</tt><big>(</big><em>fn</em><big>)</big><a class="headerlink" href="#Model.Model.save" title="Permalink to this definition">¶</a></dt>
+<dd><p>Save the state to a given file.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>fn</strong> (<em>str.</em>) &#8211; Filename to load from</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+<dl class="method">
+<dt id="Model.Model.save_xml">
+<tt class="descname">save_xml</tt><big>(</big><em>fn</em><big>)</big><a class="headerlink" href="#Model.Model.save_xml" title="Permalink to this definition">¶</a></dt>
+<dd><p>Save the state to a given XML file.</p>
+<table class="docutils field-list" frame="void" rules="none">
+<col class="field-name" />
+<col class="field-body" />
+<tbody valign="top">
+<tr class="field-odd field"><th class="field-name">Parameters:</th><td class="field-body"><strong>fn</strong> (<em>str.</em>) &#8211; Filename to save to</td>
+</tr>
+</tbody>
+</table>
+</dd></dl>
+
+</dd></dl>
+
 <div class="section" id="indices-and-tables">
 <h3>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Permalink to this headline">¶</a></h3>
 <ul class="simple">
@@ -259,8 +366,15 @@ referring to the same space as the view (global).</p>
 <li><a class="reference internal" href="#introduction">Introduction</a></li>
 <li><a class="reference internal" href="#conceptual-model">Conceptual model</a></li>
 <li><a class="reference internal" href="#programming-model">Programming model</a></li>
-<li><a class="reference internal" href="#gui-tools">GUI Tools</a></li>
-<li><a class="reference internal" href="#todo">TODO</a><ul>
+<li><a class="reference internal" href="#gui-tools">GUI Tools</a><ul>
+<li><a class="reference internal" href="#menu-tools">Menu tools</a></li>
+<li><a class="reference internal" href="#toolbar-tools">Toolbar tools</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#documentation-for-the-code">Documentation for the Code</a><ul>
+<li><a class="reference internal" href="#module-Model">Model</a><ul>
 <li><a class="reference internal" href="#indices-and-tables">Indices and tables</a></li>
 </ul>
 </li>
@@ -296,6 +410,9 @@ referring to the same space as the view (global).</p>
         <li class="right" style="margin-right: 10px">
           <a href="genindex.html" title="General Index"
              >index</a></li>
+        <li class="right" >
+          <a href="py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
         <li><a href="#">SuperKluge 5 documentation</a> &raquo;</li> 
       </ul>
     </div>

@@ -1,7 +1,26 @@
 <?xml version="1.0" ?>
 <Model>
-	<Spaces/>
-	<FigureAdapter space_inds="[None]" template_name="'1x1'">
+	<Spaces>
+		<Space key="'Space 1'">
+			<Image cmap="'jet'" fn="'dicomfile1.npy'" origin="(10, 25, 25, 0)" vmax="7044.151210784895" vmin="0.0"/>
+			<Image cmap="'jet'" fn="'dicomfile1.npy'" origin="(20, 50, 50, 0)" vmax="7044.151210784895" vmin="0.0"/>
+			<HyperRectangleROI c="(20, 150, 150, 0)" r="(3, 10, 10, 0)"/>
+			<HyperEllipseROI c="(20, 100, 100, 0)" r="(3, 10, 10, 0)"/>
+		</Space>
+		<Space key="'Space 2'">
+			<Image cmap="'gray'" fn="'dicomfile2.npy'" origin="(0, 0, 0, 0)" vmax="1000" vmin="0.0"/>
+			<DataROI fn="'dicomfile2.npy'" origin="(0, 0, 0, 0)"/>
+		</Space>
+	</Spaces>
+	<FigureAdapter template_name="'3x3'">
+		<AxesAdapter a1="1" a2="2" proj="[10, 149.5, 149.5, 0]" xmax="274L" xmin="25" ymax="274L" ymin="25"/>
+		<AxesAdapter a1="1" a2="2" proj="[10, 149.5, 149.5, 0]" xmax="274L" xmin="25" ymax="274L" ymin="25"/>
+		<AxesAdapter a1="1" a2="2" proj="[10, 149.5, 149.5, 0]" xmax="274L" xmin="25" ymax="274L" ymin="25"/>
+		<AxesAdapter a1="1" a2="2" proj="[0, 112.0, 112.0, 0]" xmax="224L" xmin="0" ymax="224L" ymin="0"/>
+		<AxesAdapter a1="1" a2="2" proj="[0, 112.0, 112.0, 0]" xmax="224L" xmin="0" ymax="224L" ymin="0"/>
+		<AxesAdapter a1="1" a2="2" proj="[0, 112.0, 112.0, 0]" xmax="224L" xmin="0" ymax="224L" ymin="0"/>
+		<AxesAdapter a1="1" a2="2" proj="[0, 0, 0, 0]" xmax="100.0" xmin="0.0" ymax="100.0" ymin="0.0"/>
+		<AxesAdapter a1="1" a2="2" proj="[0, 0, 0, 0]" xmax="100.0" xmin="0.0" ymax="100.0" ymin="0.0"/>
 		<AxesAdapter a1="1" a2="2" proj="[0, 0, 0, 0]" xmax="100.0" xmin="0.0" ymax="100.0" ymin="0.0"/>
 	</FigureAdapter>
 </Model>

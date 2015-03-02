@@ -5,9 +5,11 @@
 import Globals
 import os.path
 import Tkinter as Tk
-from matplotlib.figure import Figure
-from Widgets import PlotViewer, SpacesViewer, MasterMenu
-from Model import Model
+from Widgets import PlotViewer, SpacesViewer
+from Data import Spaces
+from Plot import FigureAdapter
+from XML import load_xml, save_xml
+
 
 # Root window
 class GUI(Tk.Tk):
@@ -15,24 +17,26 @@ class GUI(Tk.Tk):
         Tk.Tk.__init__(self)
 
         self.wm_title("SuperKluge")
+        self.protocol("WM_DELETE_WINDOW", self.save)
 
-        # Plotting backend
-        self.plotter = Plotter()
-        # Data model: contains array data and plotting specifications
-        self.model = Model(self)
-        self.model.load('load.xml' if os.path.isfile('load.xml') else None)
+        # Data model with some random data added
+        if os.path.isfile('load.xml'):
+            self.spaces, self.figure_adapter = load_xml('load.xml')
+        else:
+            self.spaces = Spaces()
+            self.figure_adapter = FigureAdapter('1x1', self.spaces)
+
         # Data model viewer: a tree widget on the right side
-        self.tree = SpacesViewer(self)
-        self.tree.pack(side=Tk.RIGHT, fill=Tk.Y, expand=Tk.NO)
-        # Plotting backend viewer: Matplotlib canvas and a toolbar on the center
-        self.viewer = PlotViewer(self)
-        self.viewer.pack(side=Tk.RIGHT, fill=Tk.BOTH, expand=Tk.YES)
-        # Menubar
-        self.menubar = MasterMenu(self)
+        viewer = SpacesViewer(self, self.spaces)
+        viewer.pack(side=Tk.RIGHT, fill=Tk.Y, expand=Tk.NO)
+        # Plot viewer: Matplotlib 2D projections viewer into the data
+        viewer = PlotViewer(self, self.figure_adapter)
+        viewer.pack(side=Tk.RIGHT, fill=Tk.BOTH, expand=Tk.YES)
 
-class Plotter(object):
-    def __init__(self):
-        self.figure = Figure(figsize=(5,4), dpi=100)
+    # TODO: add a dialog box for saving, importing should be possible when running
+    def save(self):
+        save_xml('save.xml', self.spaces, self.figure_adapter)
+        self.destroy()
 
 
 if __name__ =='__main__':

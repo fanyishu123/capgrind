@@ -5,7 +5,7 @@ from Globals import NORM_3D
 
 # Copies adapter properities from source into destination
 def copy_adapter(dest, source):
-    dest.space = source.get_space()
+    dest.space = source.space
     dest.set_axes(source.a1, source.a2)
     dest.set_proj(source.proj)
     dest.set_axes_limits(((source.xmin, source.xmax), (source.ymin, source.ymax)))
@@ -19,7 +19,7 @@ def FULLSCREEN(fig_adapter, adapter):
 def PROJECTION(fig_adapter, adapter):
     for t, i in NORM_3D.items():
         a = fig_adapter.adapters[i]
-        a.space_key = adapter.space_key
+        a.space = adapter.space
         a.set_axes(t[0], t[1])
         a.set_proj(adapter.proj)
         a.center_to_point()

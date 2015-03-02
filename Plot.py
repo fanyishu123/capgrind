@@ -15,13 +15,16 @@ import Data
 
 # Constricts a point inside a given bounding box
 constrict = lambda proj, bbox : [min(max(i, lims[0]), lims[1]-1) for i, lims in zip(proj,bbox)]
+valid = lambda i, l: 0 <= i < len(l)
 
 # Plotting front end component: interfaces the matplotlib figure to perform required actions
 class FigureAdapter(object):
 
     @trigger_update
-    def __init__(self, gui, template_name):
-        self.gui = gui
+    def __init__(self, template_name, spaces):
+        self.spaces = spaces
+        spaces._callbacks.append(self.space_updated)
+        self.figure = Figure(figsize=(5,4), dpi=100)
         self.adapters = []
         self.template_name = template_name
         self._action_adapter = None
@@ -31,17 +34,18 @@ class FigureAdapter(object):
         grid_spec, grid_inds, space_inds, post_processing = TEMPLATES[self.template_name]
         grid_generator = gridspec.GridSpec(*grid_spec)
         cells = [grid_generator[loc] for loc in grid_inds]
-        map_to_space = [self.gui.model.spaces.spaces[ind].key if 0 <= ind < len(self.gui.model.spaces.spaces) else ""
-                        for ind in space_inds]
-        for i, cell, space_key in zip(range(len(cells)), cells, map_to_space):
-            self.gui.plotter.figure.add_subplot(cell)
-            self.adapters.append(AxesAdapter(self, i, space_key))
+        map_to_space = [self.spaces.spaces[ind] if 0 <= ind < len(self.spaces.spaces) else None for ind in space_inds]
+        for cell, space in zip(cells, map_to_space):
+            ax = self.figure.add_subplot(cell)
+            ax2 = AxesAdapter(self, ax, space)
+            ax.adapter = ax2
+            self.adapters.append(ax2)
         if post_processing and self._action_adapter:
             post_processing(self, self._action_adapter)
 
     def _del_adapters(self):
         self.adapters = []
-        self.gui.plotter.figure.clf()
+        self.figure.clf()
 
     @trigger_update
     def set_template(self, template_name, action_adapter=None):
@@ -53,19 +57,19 @@ class FigureAdapter(object):
         self._add_adapters()
         self.redraw_canvas()
 
-    def spaces_updated(self, space, spaces_container=False):
+    def space_updated(self, space, spaces_container=False):
         if spaces_container:
-            cur_spaces = [space.key for space in self.gui.model.spaces.spaces]
-            [a2.set_space("") for a2 in self.adapters if a2.space_key not in cur_spaces]
+            cur_spaces = [space for space in self.spaces.spaces]
+            [a2.set_space(None) for a2 in self.adapters if a2.space not in cur_spaces]
         else:
-            [a2.updated() for a2 in self.adapters if a2.space_key == space.key]
+            [a2.updated() for a2 in self.adapters if a2.space == space]
 
     def redraw_canvas(self):
-        if self.gui.plotter.figure.canvas:
-            self.gui.plotter.figure.canvas.draw_idle()
+        if self.figure.canvas:
+            self.figure.canvas.draw_idle()
 
     def iter_space(self, adapter):
-        return [a2 for a2 in self.adapters if a2.space_key == adapter.space_key]
+        return [a2 for a2 in self.adapters if a2.space == adapter.space]
 
 
 # Plotting front end component: contains a 2 dim slice specification of a D dim hyperspace
@@ -78,28 +82,26 @@ class FigureAdapter(object):
 
 class Projection(object):
 
-    def __init__(self):
+    def __init__(self, space):
+        self.space = space
         self.proj = [0]*D
         self.a1, self.a2 = 1, 2
         self.xmin, self.xmax = 0.0, 100.0
         self.ymin, self.ymax = 0.0, 100.0
 
-    def get_bbox(self):
-        return self.get_space().get_bbox()
-
     @trigger_update
     def reset_limits(self):
         (self.xmin, self.xmax), (self.ymin, self.ymax) = self.get_axes_limits()
-        self.proj = constrict(self.proj, self.get_bbox())
+        self.proj = constrict(self.proj, self.space.get_bbox())
 
     @trigger_update
     def reset_point(self):
         self.set_axes_point((self.xmax + self.xmin)/2.0, (self.ymax + self.ymin)/2.0)
 
     @trigger_update
-    def set_space(self, space_key):
-        self.space_key = space_key
-        if self.space_key: self.reset_limits()
+    def set_space(self, space):
+        self.space = space
+        if self.space: self.reset_limits()
 
     @trigger_update
     def set_axes(self, a1, a2):
@@ -113,7 +115,7 @@ class Projection(object):
         return RL_DIM[self.a2]/RL_DIM[self.a1]
 
     def get_axes_limits(self):
-        bbox = self.get_bbox()
+        bbox = self.space.get_bbox()
         return bbox[self.a1], bbox[self.a2]
 
     @trigger_update
@@ -150,7 +152,7 @@ class Projection(object):
         self.ymin, self.ymax = cy-wy/2.0/z, cy+wy/2.0/z
 
     def get_axis_limits(self, a):
-        return self.get_bbox()[a]
+        return self.space.get_bbox()[a]
 
     def get_axis_length(self, a):
         imin, imax = self.get_axis_limits(a)
@@ -158,7 +160,7 @@ class Projection(object):
 
     @trigger_update
     def set_proj(self, proj):
-        self.proj = constrict(proj, self.get_bbox())
+        self.proj = constrict(proj, self.space.get_bbox())
 
     @trigger_update
     def set_proj_axis(self, a, i):
@@ -178,42 +180,33 @@ class Projection(object):
 class AxesAdapter(Projection):
 
     @trigger_update
-    def __init__(self, figure_adapter, axes_ind, space_key):
-        Projection.__init__(self)
-        self.figure_adapter = figure_adapter
-        self.space_key = space_key
-        self.axes_ind = axes_ind
+    def __init__(self, figure_adapter, axes, space):
+        Projection.__init__(self, space)
+        self.fig_adapter = figure_adapter
+        self.axes = axes
         self.plot_objects = [Crosshair(self), AxesIndicator(self), SpaceIndicator(self)]
-        if self.space_key:
+        if self.space:
             self.reset_limits()
             self.reset_point()
 
-    def get_ax(self):
-        return self.figure_adapter.gui.plotter.figure.axes[self.axes_ind]
-
-    def get_space(self):
-        return self.figure_adapter.gui.model.spaces.get_space(self.space_key)
-
     def updated(self):
-        ax = self.get_ax()
-        del ax.patches[:]
-        del ax.images[:]
-        if self.space_key:
-            space = self.get_space()
-            for z, array in enumerate(space.arrays):
+        del self.axes.patches[:]
+        del self.axes.images[:]
+        if self.space:
+            for z, array in enumerate(self.space.arrays):
                 if array.contains(self.proj, skip=(self.a1, self.a2)):
                     if isinstance(array, Data.AbstractROI):
-                        ax.add_patch(array.get_patch(self.proj, self.a1, self.a2))
+                        self.axes.add_patch(array.get_patch(self.proj, self.a1, self.a2))
                     elif isinstance(array, Data.DataArray):
                         xlims, ylims = array.bbox[self.a1], array.bbox[self.a2]
                         array_data = array.get_slice(self.proj, to=(self.a1, self.a2))
-                        ax.imshow(array_data, extent=xlims+ylims, origin='lower', interpolation='nearest',
-                                  cmap=array.cmap, vmin=array.vmin, vmax=array.vmax, alpha=array.alpha)
-        ax.set_xlim((self.xmin, self.xmax))
-        ax.set_ylim((self.ymin, self.ymax))
-        ax.set_aspect(self.get_axes_aspect())
+                        self.axes.imshow(array_data, extent=xlims+ylims, origin='lower', interpolation='nearest',
+                                         cmap=array.cmap, vmin=array.vmin, vmax=array.vmax, alpha=array.alpha)
+        self.axes.set_xlim((self.xmin, self.xmax))
+        self.axes.set_ylim((self.ymin, self.ymax))
+        self.axes.set_aspect(self.get_axes_aspect())
         [obj.update() for obj in self.plot_objects]
-        self.figure_adapter.redraw_canvas()
+        self.fig_adapter.redraw_canvas()
 
 
 # Plot object: produces a certain artifact to a given axes based on adapter properties
@@ -227,35 +220,31 @@ class Crosshair(PlotObject):
         self.adapter = adapter
         self.l1 = Line2D((0,0),(0,0), color='green', visible=False)
         self.l2 = Line2D((0,0),(0,0), color='green', visible=False)
-        self.adapter.get_ax().lines.extend((self.l1,self.l2))
+        self.adapter.axes.lines.extend((self.l1,self.l2))
 
     def update(self):
         x1, x2 = self.adapter.xmin, self.adapter.xmax
         y1, y2 = self.adapter.ymin, self.adapter.ymax
         x,y = self.adapter.get_axes_point()
-        trans = self.adapter.get_ax().transData
-        self.l1.set(xdata=[x, x], ydata=[y1, y2], transform=trans, visible=(x >= x1 and x <= x2))
-        self.l2.set(xdata=[x1, x2], ydata=[y, y], transform=trans, visible=(y >= y1 and y <= y2))
+        self.l1.set(xdata=[x, x], ydata=[y1, y2], transform=self.adapter.axes.transData, visible=(x >= x1 and x <= x2))
+        self.l2.set(xdata=[x1, x2], ydata=[y, y], transform=self.adapter.axes.transData, visible=(y >= y1 and y <= y2))
 
     def delete(self):
-        ax = self.adapter.get_ax()
-        ax.axes.lines.remove(self.l1)
-        ax.axes.lines.remove(self.l2)
+        self.adapter.axes.lines.remove(self.l1)
+        self.adapter.axes.lines.remove(self.l2)
 
 class AxesIndicator(PlotObject):
 
     def __init__(self, adapter):
         self.adapter = adapter
-        ax = self.adapter.get_ax()
-        ax.grid('on')
-        matplotlib.artist.setp(ax.get_xticklabels(), fontsize='6')
-        matplotlib.artist.setp(ax.get_yticklabels(), fontsize='6')
+        self.adapter.axes.grid('on')
+        matplotlib.artist.setp(self.adapter.axes.get_xticklabels(), fontsize='6')
+        matplotlib.artist.setp(self.adapter.axes.get_yticklabels(), fontsize='6')
 
     def update(self):
-        ax = self.adapter.get_ax()
         x,y = self.adapter.get_axes_labels()
-        ax.set_xlabel(x, size='small')
-        ax.set_ylabel(y, size='small')
+        self.adapter.axes.set_xlabel(x, size='small')
+        self.adapter.axes.set_ylabel(y, size='small')
 
     def delete(self): pass
 
@@ -263,18 +252,16 @@ class SpaceIndicator(PlotObject):
 
     def __init__(self, adapter):
         self.adapter = adapter
-        ax = self.adapter.get_ax()
-        self.txt = ax.text(0.05, 0.95, "", fontsize=10, color='red', fontweight='bold', va='top',
-                           transform=ax.transAxes)
+        self.txt = self.adapter.axes.text(0.05, 0.95, "", fontsize=10, color='red', fontweight='bold',
+                                          va='top', transform=self.adapter.axes.transAxes)
 
     def update(self):
-        ax = self.adapter.get_ax()
-        if self.adapter.space_key:
-            ax.set_axis_bgcolor('white')
-            self.txt.set(text=self.adapter.space_key)
+        if self.adapter.space:
+            self.adapter.axes.set_axis_bgcolor('white')
+            self.txt.set(text=self.adapter.space.index())
         else:
-            ax.set_axis_bgcolor('black')
+            self.adapter.axes.set_axis_bgcolor('black')
             self.txt.set(text="None")
 
     def delete(self):
-        self.adapter.get_ax().texts.remove(self.txt)
+        self.adapter.axes.texts.remove(self.txt)

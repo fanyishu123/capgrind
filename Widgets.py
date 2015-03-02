@@ -6,14 +6,11 @@ from Globals import CMAPS
 import Tkinter as Tk
 import ttk
 import tkFileDialog
-import tkMessageBox
-import numpy
-import os
+
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg #, NavigationToolbar2TkAgg
 from Toolbar import NavigationToolbar2TkAgg
 import Data
-from Templates import STATIC_TEMPLATES
 
 # Checks if all objects in a list are instances of a given type
 all_instances = lambda l, inst : min([isinstance(o, inst) for o in l])
@@ -21,22 +18,23 @@ all_instances = lambda l, inst : min([isinstance(o, inst) for o in l])
 # Contains the plotter drawing area and the toolbar
 class PlotViewer(Tk.Frame):
 
-    def __init__(self, gui):
-        Tk.Frame.__init__(self, master=gui)
-        self.gui = gui
+    def __init__(self, root, figure_adapter):
+        Tk.Frame.__init__(self, master=root)
+        self.figure_adapter = figure_adapter
         # Image (tk.DrawingArea)
-        self.canvas = FigureCanvasTkAgg(gui.plotter.figure, master=self)
+        self.canvas = FigureCanvasTkAgg(self.figure_adapter.figure, master=self)
         self.canvas.show()
         self.canvas.get_tk_widget().pack(side=Tk.TOP,fill=Tk.BOTH,expand=Tk.YES)
         # Matplotlib toolbar
-        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self.gui, self)
+        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self)
         self.toolbar.update()
 
 # Views the data model as a tree (forest) Spaces -> Space -> DataLayer
 class SpacesViewer(Tk.Frame):
-    def __init__(self, gui):
-        Tk.Frame.__init__(self, master=gui)
-        self.gui = gui
+    def __init__(self, root, spaces):
+        Tk.Frame.__init__(self, master=root)
+        self.spaces = spaces
+        spaces._callbacks.append(self.spaces_updated)
         self.tree = ttk.Treeview(self, columns=('info'))
         self.tree.column('info', width=150)
         self.tree.column('#0', width=100)
@@ -51,11 +49,10 @@ class SpacesViewer(Tk.Frame):
 
         self._id_to_object = dict()
         self._add_tree()
-        self._clipboard = []
 
     def _add_tree(self):
         root_id = ''
-        for space in self.gui.model.spaces.spaces:
+        for space in self.spaces.spaces:
             id1 = self.tree.insert(root_id, 'end',text=space.__class__.__name__, values=(str(space),), open=True)
             self._id_to_object[id1] = space
             for layer in space.arrays:
@@ -81,7 +78,7 @@ class SpacesViewer(Tk.Frame):
         else:
             menu = Tk.Menu(self, tearoff=0)
             menu.add_command(label="Add Space", command=\
-                lambda self=self: self.gui.model.spaces.add_space(Data.Space()))
+                lambda self=self: self.spaces.add_space(Data.Space()))
             menu.tk_popup(event.x_root, event.y_root, 0)
 
 # Right click menu for a DataLayer object
@@ -98,11 +95,7 @@ class DataArrayContextMenu(Tk.Menu):
             self.add_cascade(label="Colormap", menu=menu)
             for name, cmap in CMAPS.items():
                 menu.add_command(label=name, command=lambda cmap=cmap: self.cmap_selected(cmap))
-        self.add_command(label="Copy", command=self.copy_selected)
         self.add_command(label="Delete", command=self.delete_selected)
-
-    def copy_selected(self):
-        self.viewer._clipboard = self.selected
 
     def delete_selected(self):
         for array in self.selected:
@@ -123,37 +116,17 @@ class SpaceContextMenu(Tk.Menu):
         self.add_cascade(label="Add", menu=self.menu)
         for cls in (Data.HyperRectangleROI, Data.HyperEllipseROI):
             self.menu.add_command(label=str(cls.__name__), command=lambda cls=cls: self.add_abstract(cls))
-        self.add_command(label="Import Image (dicom)", command=self.import_dicom)
-        self.add_command(label="Import Image (npy)", command=lambda:self.import_data(Data.Image))
-        self.add_command(label="Import ROI (npy)", command=lambda:self.import_data(Data.DataROI))
-        self.add_command(label="Import Overlay (npy)", command=lambda:self.import_data(Data.DataOverlay))
-        if self.viewer._clipboard: self.add_command(label="Paste", command=self.paste_selected)
+        self.add_command(label="Import Image", command=lambda:self.import_data(Data.Image))
+        self.add_command(label="Import ROI", command=lambda:self.import_data(Data.DataROI))
+        self.add_command(label="Import Overlay", command=lambda:self.import_data(Data.DataOverlay))
         self.add_command(label="Delete", command=self.delete_selected)
-
-    def import_dicom(self):
-        directory = tkFileDialog.askdirectory()
-        if directory:
-            try:
-                cache_fn = os.path.join(os.path.abspath(directory), 'cache.npy')
-                if not os.path.exists(cache_fn):
-                    import dwi.dwimage
-                    dwimage = dwi.dwimage.load_dicom([directory])[0]
-                    numpy.save(cache_fn, dwimage.image)
-                self.space.add_array(Data.Image(cache_fn))
-            except ImportError:
-                tkMessageBox.showerror("Missing library", "library 'dwi' not available")
 
     def import_data(self, DataType):
         filename = tkFileDialog.askopenfilename(filetypes=[('All supported', '.npy')])
-        print filename, type(filename)
         if filename: self.space.add_array(DataType(filename))
 
     def add_abstract(self, DataType):
         self.space.add_array(DataType())
-
-    def paste_selected(self):
-        for array in self.viewer._clipboard:
-            self.space.add_array(array)
 
     def delete_selected(self):
         self.space.spaces.remove_space(self.space)
@@ -264,40 +237,3 @@ class DataRangeEditor(object):
 
     def _selection_to_obj(self):
         return self.selected[self.ids.index(self.imagesel.get())]
-
-class MasterMenu(Tk.Menu):
-
-    def __init__(self, gui):
-        Tk.Menu.__init__(self, master=gui,tearoff=0)
-        self.gui = gui
-        gui.config(menu=self)
-        # File menu
-        self.file_menu = FileMenu(self)
-        self.add_cascade(label="File", menu=self.file_menu)
-        # Plotter menu
-        self.template_menu = TemplateMenu(self)
-        self.add_cascade(label="Templates", menu=self.template_menu)
-
-class TemplateMenu(Tk.Menu):
-
-    def __init__(self, menu):
-        Tk.Menu.__init__(self, master=menu,tearoff=0)
-        for name in STATIC_TEMPLATES.keys():
-            self.add_command(label=name, compound=Tk.LEFT,
-                             command=lambda name=name: menu.gui.model.figure_adapter.set_template(name))
-
-class FileMenu(Tk.Menu):
-    def __init__(self, menu):
-        Tk.Menu.__init__(self, master=menu,tearoff=0)
-        self.gui = menu.gui
-        self.add_command(label="Open State (XML)", compound=Tk.LEFT, command=self._open)
-        self.add_command(label="Save State (XML)", compound=Tk.LEFT, command=self._save)
-
-    def _open(self):
-        filename = tkFileDialog.askopenfilename(filetypes=[('All supported', '.xml')])
-        if filename: self.gui.model.load_xml(filename)
-
-    def _save(self):
-        filename = tkFileDialog.asksaveasfilename(filetypes=[('All supported', '.xml')], defaultextension='.xml')
-        if filename: self.gui.model.save_xml(filename)
-

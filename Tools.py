@@ -63,14 +63,14 @@ class Crosshair(Tool):
         self._propagate(adapter)
 
     def _propagate(self, adapter):
-        for a2 in adapter.figure_adapter.iter_space(adapter):
+        for a2 in adapter.fig_adapter.iter_space(adapter):
             a2.set_proj(adapter.proj)
 
     def menu(self, event, adapter):
         smenu = Tk.Menu(tearoff=0)
         for name in DYNAMIC_TEMPLATES.keys():
             smenu.add_command(label=name, compound=Tk.LEFT, command=lambda \
-                    adapter=adapter,name=name: adapter.figure_adapter.set_template(name, adapter))
+                    adapter=adapter,name=name: adapter.fig_adapter.set_template(name, adapter))
         smenu.tk_popup(int(event.guiEvent.x_root),int(event.guiEvent.y_root),0)
 
 class Projection(object):
@@ -80,7 +80,7 @@ class Projection(object):
         self._start_y = event.y
 
     def drag_proj(self, adapter, event, a):
-        x1, y1, x2, y2 = adapter.get_ax().bbox.extents
+        x1, y1, x2, y2 = adapter.axes.bbox.extents
         rel = get_rel(self._start_y, event.y, y1, y2)
         adapter.set_proj_axis(a, self._start_i+rel*adapter.get_axis_length(a))
 
@@ -113,7 +113,7 @@ class BValue(GlobalTool, Projection):
         if self.g_action: self._propagate(adapter)
 
     def _propagate(self, adapter):
-        for a2 in adapter.figure_adapter.iter_space(adapter):
+        for a2 in adapter.fig_adapter.iter_space(adapter):
             a2.set_proj(adapter.proj)
 
 class Zoom(GlobalTool):
@@ -123,7 +123,7 @@ class Zoom(GlobalTool):
         self._start_z = adapter.get_axes_zoom()
 
     def drag(self, adapter, event):
-        x1, y1, x2, y2 = adapter.get_ax().bbox.extents
+        x1, y1, x2, y2 = adapter.axes.bbox.extents
         rel = get_rel(self._start_y, event.y, y1, y2)
         adapter.set_axes_zoom(self._start_z+rel*10.0)
         if self.g_action: self._propagate(adapter)
@@ -140,7 +140,7 @@ class Zoom(GlobalTool):
 
     def _propagate(self, adapter):
         z = adapter.get_axes_zoom()
-        for a2 in adapter.figure_adapter.iter_space(adapter):
+        for a2 in adapter.fig_adapter.iter_space(adapter):
             a2.set_axes_zoom(z)
 
 class Pan(Tool):
@@ -152,7 +152,7 @@ class Pan(Tool):
         self._start_ymin = adapter.ymin
 
     def drag(self, adapter, event):
-        x1, y1, x2, y2 = adapter.get_ax().bbox.extents
+        x1, y1, x2, y2 = adapter.axes.bbox.extents
         xrel, yrel = get_rel(self._start_x, event.x, x1, x2), get_rel(self._start_y, event.y, y1, y2)
         wx, wy = (adapter.xmax-adapter.xmin), (adapter.ymax-adapter.ymin)
         nx, ny = self._start_xmin + xrel*wx, self._start_ymin + yrel*wy
@@ -178,13 +178,22 @@ class ChangeAxes(Tool):
                 lambda a1=t[0],a2=t[1],adapter=adapter: adapter.set_axes(a1, a2))
         smenu.tk_popup(int(event.guiEvent.x_root),int(event.guiEvent.y_root),0)
 
+class ChangeTemplate(Tool):
+
+    def menu(self, event, adapter):
+        smenu = Tk.Menu(tearoff=0)
+        for name in STATIC_TEMPLATES.keys():
+            smenu.add_command(label=name, compound=Tk.LEFT,
+                              command=lambda adapter=adapter,name=name: adapter.fig_adapter.set_template(name))
+        smenu.tk_popup(int(event.guiEvent.x_root),int(event.guiEvent.y_root),0)
+
 class ChangeSpace(Tool):
 
     def menu(self, event, adapter):
         smenu = Tk.Menu(tearoff=0)
-        for space_ind, space in enumerate(adapter.figure_adapter.gui.model.spaces.spaces):
-            smenu.add_command(label=str(space), compound=Tk.LEFT, command=\
-                lambda adapter=adapter,space=space: adapter.set_space(space.key))
+        for space_ind, space in enumerate(adapter.fig_adapter.spaces.spaces):
+            smenu.add_command(label=str(space_ind)+" - "+str(space), compound=Tk.LEFT, command=\
+                lambda adapter=adapter,space=space: adapter.set_space(space))
         smenu.tk_popup(int(event.guiEvent.x_root),int(event.guiEvent.y_root),0)
 
 
@@ -198,10 +207,10 @@ class ROISelector(GlobalTool):
 
     def start(self, adapter, event):
         self._start_x, self._start_y = event.xdata, event.ydata
-        if not self.roi or self._last_space != adapter.space_key:
+        if not self.roi or self._last_space != adapter.space:
             roi = self.ROI_OBJ()
-            adapter.get_space().add_array(roi)
-            self._last_space = adapter.space_key
+            adapter.space.add_array(roi)
+            self._last_space = adapter.space
             self.roi = roi
         self._set_roi_start(adapter)
 
@@ -233,11 +242,11 @@ class ROISelector(GlobalTool):
                 #self._propagate(adapter)
 
     def menu(self, event, adapter):
-        ROIs = [array for array in adapter.get_space().arrays if isinstance(array, self.ROI_OBJ)]
+        ROIs = [array for array in adapter.space.arrays if isinstance(array, self.ROI_OBJ)]
         smenu = Tk.Menu(tearoff=0)
         for roi in ROIs:
             txt = str(roi) if roi != self.roi else "[" + str(roi) + "]"
-            smenu.add_command(label=txt, compound=Tk.LEFT, command=lambda self=self,space=adapter.get_space(),roi=roi:\
+            smenu.add_command(label=txt, compound=Tk.LEFT, command=lambda self=self,space=adapter.space,roi=roi:\
                 self._set_roi(space, roi))
         smenu.tk_popup(int(event.guiEvent.x_root),int(event.guiEvent.y_root),0)
 

@@ -17,28 +17,19 @@ max_bbox = lambda b1, b2 : [ubox_i(t1,t2) for t1,t2 in zip(b1,b2)]
 roi_bbox = lambda c, r : zip(del_i(c, r), add_i(c, r))
 array_bbox = lambda o, s : zip(o, add_i(o, s))
 
-def get_next(names, prefix):
-    i = 1
-    while prefix+" "+str(i) in names:
-        i+=1
-    return prefix+" "+str(i)
 
 # A collection of Spaces
 class Spaces(object):
 
-    def __init__(self, model, spaces=()):
-        self.model = model
+    def __init__(self, spaces=()):
+        self._callbacks = []
         self.spaces = []
         [self.add_space(s) for s in spaces]
 
     def add_space(self, space):
         space.spaces = self
         self.spaces.append(space)
-        space.key = get_next([space.key for space in self.spaces], "Space")
         self.updated(space, spaces_container=True)
-
-    def get_space(self, space_key):
-        return [space for space in self.spaces if space.key == space_key][0]
 
     def remove_space(self, space):
         space.spaces = None
@@ -46,16 +37,15 @@ class Spaces(object):
         self.updated(space, spaces_container=True)
 
     def updated(self, space, spaces_container=False):
-        self.model.spaces_updated(space, spaces_container)
+        [f(space, spaces_container) for f in self._callbacks]
 
 #TODO: this should define the dimensions
 
 # Represents a physical hyperspace
 class Space(object):
 
-    def __init__(self, key="", arrays=()):
+    def __init__(self, arrays=()):
         self.spaces = None
-        self.key = key
         self.arrays = []
         [self.add_array(a) for a in arrays]
 
@@ -76,7 +66,7 @@ class Space(object):
         return self.spaces.spaces.index(self)
 
     def __str__(self):
-        return self.key
+        return RL_spec
 
     def updated(self):
         if self.spaces: self.spaces.updated(self)

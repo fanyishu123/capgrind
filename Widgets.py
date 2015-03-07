@@ -11,6 +11,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg #, NavigationToolbar2TkAgg
 from Toolbar import NavigationToolbar2TkAgg
 import Data
+import numpy
 
 # Checks if all objects in a list are instances of a given type
 all_instances = lambda l, inst : min([isinstance(o, inst) for o in l])
@@ -26,7 +27,7 @@ class PlotViewer(Tk.Frame):
         self.canvas.show()
         self.canvas.get_tk_widget().pack(side=Tk.TOP,fill=Tk.BOTH,expand=Tk.YES)
         # Matplotlib toolbar
-        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self)
+        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self)##Toolbar
         self.toolbar.update()
 
 # Views the data model as a tree (forest) Spaces -> Space -> DataLayer
@@ -95,8 +96,13 @@ class DataArrayContextMenu(Tk.Menu):
             self.add_cascade(label="Colormap", menu=menu)
             for name, cmap in CMAPS.items():
                 menu.add_command(label=name, command=lambda cmap=cmap: self.cmap_selected(cmap))
-        self.add_command(label="Delete", command=self.delete_selected)
-
+            self.add_command(label="Delete", command=self.delete_selected)##Fan
+        else:
+            self.add_command(label="Delete", command=self.delete_selected)##Fan
+            if all_instances(selected,Data.HyperEllipseROI):##Fan
+                self.add_command(label="Export ROI", command=self.saveEllipsemask)##Fan
+            if all_instances(selected,Data.HyperRectangleROI):#Fan
+                self.add_command(label="Export ROI", command=self.saveRectanglemask)##Fan
     def delete_selected(self):
         for array in self.selected:
             array.space.remove_array(array)
@@ -105,6 +111,37 @@ class DataArrayContextMenu(Tk.Menu):
         for array in self.selected:
             array.set_cmap(cmap)
 
+    def saveEllipsemask(self): ##FAN
+        size=self.selected[0].space.arrays[0].image.shape
+        r = self.selected[0].r
+        c = self.selected[0].c
+        r_string = "_r=(%d,%d,%d,%d)"%(r[0],r[1],r[2],r[3])
+        c_string ="_c=(%d,%d,%d,%d)"%(c[0],c[1],c[2],c[3])
+        filename = self.selected[0].space.arrays[0].fn+"_"+"Ellipse"+r_string+c_string
+        mask = numpy.zeros(size);
+        for x in range(size[0]):
+            for y in range(size[1]):
+                for z in range(size[2]):
+                    m = ((x-c[0])/r[0])**2+ ((y-c[1])/r[1])**2+((z-c[2])/r[2])**2
+                    if m<=1:
+                        mask[x][y][z][c[3]]=1
+        numpy.save(filename, mask)
+
+    def saveRectanglemask(self): ##Fan
+        size=self.selected[0].space.arrays[0].image.shape
+        r = self.selected[0].r
+        c = self.selected[0].c
+        r_string = "_r=(%d,%d,%d,%d)"%(r[0],r[1],r[2],r[3])
+        c_string ="_c=(%d,%d,%d,%d)"%(c[0],c[1],c[2],c[3])
+        filename = self.selected[0].space.arrays[0].fn+"_"+"Rectangle"+r_string+c_string
+        mask = numpy.zeros(size);
+        for x in range(size[0]):
+            for y in range(size[1]):
+                for z in range(size[2]):
+                    if abs(x-c[0])<=r[0] and abs(x-c[1])<=r[1] and abs(x-c[2])<=r[2] :
+                        mask[x][y][z][c[3]]=1
+
+        numpy.save(filename, mask)
 # Right click menu for a Space object
 class SpaceContextMenu(Tk.Menu):
 
